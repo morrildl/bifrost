@@ -56,6 +56,9 @@
       with_items:
         - ovpn-admin
 
+    - name: copy .ovpn template
+      template: src=opt/openvpn/etc/template.ovpn dest=/opt/openvpn/etc/template.ovpn owner=root group=root mode=u+rw,g+r,o+r
+
     - name: copy certificate files
       copy: src=keymatter/{{item}} dest=/opt/openvpn/etc/{{item}} owner=root group=root mode=u+rw,g-rwx,o-rwx
       with_items:
@@ -64,7 +67,8 @@
         - server.key
         - server-pw.txt
         - dh-4096.pem
-        - tls-auth.key
+        - tls-auth.pem
+        - client.crt
 
     - name: create sqlite DB
       command: /usr/bin/sqlite3

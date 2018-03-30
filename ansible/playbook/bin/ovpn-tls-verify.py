@@ -3,7 +3,7 @@
 import sys, os, sqlite3, ldap
 
 try:
-  PEER_FINGERPRINT = os.environ.get("tls_digest_sha256_0", "")
+  PEER_FINGERPRINT = os.environ.get("tls_digest_sha256_0", "").replace(":", "")
   SQLITE_FILE = sys.argv[1]
   CERT_DEPTH = int(sys.argv[2])
   COMMON_NAME = sys.argv[3]

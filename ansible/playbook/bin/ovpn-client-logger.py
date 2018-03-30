@@ -6,7 +6,7 @@ try:
   print sys.argv
   SQLITE_FILE = sys.argv[1]
   COMMON_NAME = os.environ.get("common_name")
-  IP_ADDR = os.environ.get("ifconfig_pool_remote_ip")
+  IP_ADDR = os.environ.get("trusted_ip")
   SCRIPT_TYPE = os.environ.get('script_type', 'unknown')
 
   print os.environ
@@ -17,8 +17,8 @@ try:
 
   cxn = sqlite3.connect(SQLITE_FILE)
   query = cxn.execute(
-    "insert into events (email, ip, event) values (?, ?, ?)",
-    [COMMON_NAME, IP_ADDR, SCRIPT_TYPE])
+    "insert into events (email, event, value) values (?, ?, ?)",
+    [COMMON_NAME, SCRIPT_TYPE, IP_ADDR])
   cxn.commit()
   try:
     query.close()
