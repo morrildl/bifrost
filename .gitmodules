@@ -1,0 +1,33 @@
+[submodule "src/vendor/playground/log"]
+	path = src/vendor/playground/log
+	url = ssh://code.playground.global:29418/studio/playground/log
+[submodule "src/vendor/playground/config"]
+	path = src/vendor/playground/config
+	url = ssh://code.playground.global:29418/studio/playground/config
+[submodule "src/vendor/playground/httputil"]
+	path = src/vendor/playground/httputil
+	url = ssh://code.playground.global:29418/studio/playground/httputil
+[submodule "src/vendor/github.com/mattn/go-sqlite3"]
+	path = src/vendor/github.com/mattn/go-sqlite3
+	url = https://github.com/mattn/go-sqlite3
+[submodule "src/vendor/golang.org/x/net"]
+	path = src/vendor/golang.org/x/net
+	url = https://go.googlesource.com/net
+[submodule "src/vendor/playground/session"]
+	path = src/vendor/playground/session
+	url = ssh://code.playground.global:29418/studio/playground/session
+[submodule "src/vendor/golang.org/x/oauth2"]
+	path = src/vendor/golang.org/x/oauth2
+	url = https://go.googlesource.com/oauth2
+[submodule "src/vendor/github.com/dgrijalva/jwt-go"]
+	path = src/vendor/github.com/dgrijalva/jwt-go
+	url = https://github.com/dgrijalva/jwt-go
+[submodule "src/vendor/playground/ca"]
+	path = src/vendor/playground/ca
+	url = ssh://code.playground.global:29418/studio/playground/ca
+[submodule "src/vendor/github.com/boombuler/barcode"]
+	path = src/vendor/github.com/boombuler/barcode
+	url = https://github.com/boombuler/barcode
+[submodule "src/vendor/github.com/pquerna/otp"]
+	path = src/vendor/github.com/pquerna/otp
+	url = https://github.com/pquerna/otp

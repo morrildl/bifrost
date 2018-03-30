@@ -1,0 +1,89 @@
+---
+- hosts: openvpn
+  remote_user: root
+  handlers:
+    - name: run /sbin/reboot
+      listen: reboot machine
+      command: /sbin/reboot
+
+    - name: wait for sshd
+      listen: reboot machine
+      local_action: wait_for host={{inventory_hostname}} search_regex=OpenSSH port=22 timeout=300
+  
+  tasks:
+    - name: add necessary packages
+      package: pkg={{ item }} state=present
+      with_items:
+        - openvpn
+        - iptables-services
+        - python-pyotp
+        - python2-future
+        - python-ldap
+        - sqlite
+        - python-qrcode
+
+    - name: copy iptables config
+      template: src=etc/sysconfig/iptables dest=/etc/sysconfig/iptables owner=root group=root mode=u+rw,g+r,o+r
+
+    - name: enable iptables
+      service: name=iptables state=started enabled=yes
+
+    - name: enable ip_forward
+      copy: src=etc/sysctl.d/90-ip_forward.conf dest=/etc/sysctl.d/90-ip_forward.conf owner=root group=root mode=u+rw,g+r,o+r
+
+    - name: copy OpenVPN config file
+      template: src=etc/openvpn/server/main.conf dest=/etc/openvpn/server/main.conf owner=root group=root mode=u+rw,g+r,o+r
+
+    - name: create opt directory
+      file: state=directory path=/opt/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
+      with_items:
+        - openvpn
+        - openvpn/bin
+        - openvpn/etc
+
+    - name: create var directory
+      file: state=directory path=/var/run/openvpn owner=root group=root mode=u+rwx,g-rwx,o-rwx
+
+    - name: copy script files
+      copy: src=bin/{{ item }} dest=/opt/openvpn/bin/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
+      with_items:
+        - ovpn-auth-user-pass-verify.py
+        - ovpn-tls-verify.py
+        - ovpn-client-logger.py
+
+    - name: copy sbin file
+      copy: src=sbin/{{ item }} dest=/usr/local/sbin/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
+      with_items:
+        - ovpn-admin
+
+    - name: copy certificate files
+      copy: src=keymatter/{{item}} dest=/opt/openvpn/etc/{{item}} owner=root group=root mode=u+rw,g-rwx,o-rwx
+      with_items:
+        - ca.crt
+        - server.crt
+        - server.key
+        - server-pw.txt
+        - dh-4096.pem
+        - tls-auth.key
+
+    - name: create sqlite DB
+      command: /usr/bin/sqlite3
+      args:
+        stdin:
+          .open /opt/openvpn/db.sqlite3
+
+          CREATE TABLE certs (rowid integer primary key, email text not null, fingerprint text not null unique, desc text, created timestamp not null default current_timestamp, expires timestamp not null, revoked timestamp default null);
+          CREATE INDEX certs_email_idx on certs (email);
+          CREATE INDEX certs_fp_idx on certs (fingerprint);
+          CREATE INDEX certs_created_idx on certs (created);
+          CREATE INDEX certs_revoked_idx on certs (revoked);
+
+          CREATE TABLE totp (rowid integer primary key, email text not null unique, seed text not null, created timestamp not null default current_timestamp, updated timestamp not null default current_timestamp);
+          CREATE INDEX totp_email_idx on totp (email);
+
+          CREATE TABLE events (rowid integer primary key, event text not null, email text not null, value text not null, ts timestamp not null default current_timestamp);
+          CREATE INDEX events_evt_idx on events (event);
+          CREATE INDEX events_email_idx on events (email);
+          CREATE INDEX events_value_idx on events (value);
+          CREATE INDEX events_ts_idx on events (ts);
+        creates: /opt/openvpn/db.sqlite3
