@@ -18,8 +18,8 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/pquerna/otp/totp"
 	_ "github.com/mattn/go-sqlite3"
+	"github.com/pquerna/otp/totp"
 
 	"playground/ca"
 	"playground/config"
@@ -31,26 +31,26 @@ import (
  * Configuration data types & helpers
  */
 
-type ServerConfig struct {
-	Debug bool
+type serverConfig struct {
+	Debug                    bool
 	Port                     int
 	BindAddress              string
 	APISecret                string
 	LogFile                  string
-	SQLiteDBFile						 string
+	SQLiteDBFile             string
 	SelfSignedClientCertFile string
 	ServerCertFile           string
 	ServerKeyFile            string
-	CACertFile       string
-	CAKeyFile               string
-	CAKeyPassword               string
-	TLSAuthFile string
-	IssuedCertDuration int
-	OVPNTemplateFile    string
-	ServiceName string
+	CACertFile               string
+	CAKeyFile                string
+	CAKeyPassword            string
+	TLSAuthFile              string
+	IssuedCertDuration       int
+	OVPNTemplateFile         string
+	ServiceName              string
 }
 
-var cfg *ServerConfig = &ServerConfig{
+var cfg = &serverConfig{
 	false,
 	9000,
 	"127.0.0.1",
@@ -69,7 +69,7 @@ var cfg *ServerConfig = &ServerConfig{
 	"Playground VPN",
 }
 
-func initConfig(cfg *ServerConfig) {
+func initConfig(cfg *serverConfig) {
 	config.Load(cfg)
 
 	if cfg.LogFile != "" {
@@ -96,11 +96,11 @@ func writeDatabaseByQuery(query string, params ...interface{}) {
 	cxn := getDB()
 	defer cxn.Close()
 
-/*
-	casted := make([]interface{}, len(params))
-	for i, s := range params {
-		casted[i] = s
-	}
+	/*
+		casted := make([]interface{}, len(params))
+		for i, s := range params {
+			casted[i] = s
+		}
 	*/
 
 	_, err := cxn.Exec(query, params...)
@@ -156,7 +156,6 @@ func apiWrap(methods []string, cb func(http.ResponseWriter, *http.Request)) func
 	}
 }
 
-
 /*
  * Main loop which starts the HTTP server & defines handlers
  */
@@ -175,7 +174,6 @@ func main() {
 		log.Warn("server", "incoming unknown request to '"+req.URL.Path+"'")
 		httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 	}))
-
 
 	// Start an HTTPS server using certificate pinning - i.e. trust only one client, whose cert is our
 	// sole trusted "CA" root
@@ -201,7 +199,6 @@ func main() {
 	log.Error("server.http", "shutting down; error?", server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile))
 }
 
-
 /*
  * API endpoint handlers
  */
@@ -216,8 +213,8 @@ func usersHandler(writer http.ResponseWriter, req *http.Request) {
 	TAG := "usersHandler"
 
 	type user struct {
-		Email string
-		ActiveCerts int
+		Email        string
+		ActiveCerts  int
 		RevokedCerts int
 	}
 	users := []user{}
@@ -235,10 +232,10 @@ func usersHandler(writer http.ResponseWriter, req *http.Request) {
 			users = append(users, u)
 		}
 	}
-	sort.Slice(users, func(i, j int) bool{ return users[i].Email < users[j].Email })
+	sort.Slice(users, func(i, j int) bool { return users[i].Email < users[j].Email })
 
 	log.Status(TAG, "success")
-	httputil.SendJSON(writer, http.StatusOK, &struct{Users []user}{users})
+	httputil.SendJSON(writer, http.StatusOK, &struct{ Users []user }{users})
 }
 
 func userHandler(writer http.ResponseWriter, req *http.Request) {
@@ -273,7 +270,7 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 
 	if req.Method == "GET" {
 		type user struct {
-			Email, Created string
+			Email, Created            string
 			ActiveCerts, RevokedCerts []*cert
 		}
 
@@ -311,8 +308,8 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 					u.RevokedCerts = append(u.RevokedCerts, c)
 				}
 			}
-			sort.Slice(u.ActiveCerts, func(i, j int) bool{ return u.ActiveCerts[i].Description < u.ActiveCerts[j].Description })
-			sort.Slice(u.RevokedCerts, func(i, j int) bool{ return u.RevokedCerts[i].Description < u.RevokedCerts[j].Description })
+			sort.Slice(u.ActiveCerts, func(i, j int) bool { return u.ActiveCerts[i].Description < u.ActiveCerts[j].Description })
+			sort.Slice(u.RevokedCerts, func(i, j int) bool { return u.RevokedCerts[i].Description < u.RevokedCerts[j].Description })
 		}
 
 		log.Status(TAG, "success")
@@ -326,7 +323,7 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 		}
 
 		key, err := totp.Generate(totp.GenerateOpts{
-			Issuer: cfg.ServiceName,
+			Issuer:      cfg.ServiceName,
 			AccountName: chunks[2],
 		})
 		if err != nil {
@@ -370,7 +367,7 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 		writeDatabaseByQuery(q, "user deleted", chunks[2], fmt.Sprintf("%d certs revoked", len(fps)))
 
 		log.Status(TAG, "success")
-		httputil.SendJSON(writer, http.StatusOK, &struct{RevokedCerts []string}{fps})
+		httputil.SendJSON(writer, http.StatusOK, &struct{ RevokedCerts []string }{fps})
 		return
 	}
 
@@ -392,7 +389,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 	// POST /certs/<email> -- create a certificate for the indicated user
 	//   I: {Email: "", Description: ""}
 	//   O: application/ovpn (only if 201)
-	//   201: created; 400 (bad request): missing email or description; 
+	//   201: created; 400 (bad request): missing email or description;
 	//   401 (unauthorized): user is already at cert limit
 	// Non-GET: 409 (bad method)
 
@@ -417,7 +414,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 	if req.Method == "GET" {
 		if email == "" { // i.e. /certs or /certs/ -- means fetch all users
 			type user struct {
-				Email, Created string
+				Email, Created            string
 				ActiveCerts, RevokedCerts []*cert
 			}
 			users := make(map[string]*user)
@@ -449,11 +446,11 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 				}
 				res := struct{ Certs []*user }{[]*user{}}
 				for _, u := range users {
-					sort.Slice(u.ActiveCerts, func(i, j int) bool{ return u.ActiveCerts[i].Description < u.ActiveCerts[j].Description })
-					sort.Slice(u.RevokedCerts, func(i, j int) bool{ return u.RevokedCerts[i].Description < u.RevokedCerts[j].Description })
+					sort.Slice(u.ActiveCerts, func(i, j int) bool { return u.ActiveCerts[i].Description < u.ActiveCerts[j].Description })
+					sort.Slice(u.RevokedCerts, func(i, j int) bool { return u.RevokedCerts[i].Description < u.RevokedCerts[j].Description })
 					res.Certs = append(res.Certs, u)
 				}
-				sort.Slice(res.Certs, func(i, j int) bool{ return res.Certs[i].Email < res.Certs[j].Email })
+				sort.Slice(res.Certs, func(i, j int) bool { return res.Certs[i].Email < res.Certs[j].Email })
 				log.Status(TAG, "success")
 				httputil.SendJSON(writer, http.StatusOK, &res)
 				return
@@ -466,8 +463,8 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 				panic(err)
 			} else {
 				defer rows.Close()
-				res := struct{
-					Email, Created string
+				res := struct {
+					Email, Created            string
 					ActiveCerts, RevokedCerts []cert
 				}{Email: email}
 				for rows.Next() {
@@ -484,15 +481,13 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 					httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 					return
 				}
-				sort.Slice(res.ActiveCerts, func(i, j int) bool{ return res.ActiveCerts[i].Description < res.ActiveCerts[j].Description })
-				sort.Slice(res.RevokedCerts, func(i, j int) bool{ return res.RevokedCerts[i].Description < res.RevokedCerts[j].Description })
+				sort.Slice(res.ActiveCerts, func(i, j int) bool { return res.ActiveCerts[i].Description < res.ActiveCerts[j].Description })
+				sort.Slice(res.RevokedCerts, func(i, j int) bool { return res.RevokedCerts[i].Description < res.RevokedCerts[j].Description })
 				log.Status(TAG, "success", email)
 				httputil.SendJSON(writer, http.StatusOK, &res)
 				return
 			}
 		}
-
-		return
 	}
 
 	if req.Method == "POST" {
@@ -502,7 +497,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 			return
 		}
 
-		reqBody := &struct{Email, Description string}{}
+		reqBody := &struct{ Email, Description string }{}
 		if err := httputil.PopulateFromBody(reqBody, req); err != nil {
 			log.Warn(TAG, "missing or malformed request JSON", req.URL.Path)
 			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
@@ -537,7 +532,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		defer rows.Close()
 		if !rows.Next() {
 			// can't issue a cert for an unrecorded user
-			log.Warn(TAG, "attempt to issue cert for nonexistent user", email, q, *rows)
+			log.Warn(TAG, "attempt to issue cert for nonexistent user", email, q)
 			httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 			return
 		}
@@ -582,7 +577,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 			log.Debug(TAG, "template parse failure")
 			panic(err)
 		}
-		if err = t.Execute(&ovpn, struct{CA, Cert, Key, TLSAuth string}{string(cacrt), string(crt), string(key), string(tlsauth)}); err != nil {
+		if err = t.Execute(&ovpn, struct{ CA, Cert, Key, TLSAuth string }{string(cacrt), string(crt), string(key), string(tlsauth)}); err != nil {
 			log.Debug(TAG, "template execution failure")
 			panic(err)
 		}
@@ -708,7 +703,7 @@ func eventsHandler(writer http.ResponseWriter, req *http.Request) {
 
 	TAG := "/events"
 
-	type event struct { Event, Email, Value, Timestamp string }
+	type event struct{ Event, Email, Value, Timestamp string }
 	events := []*event{}
 
 	cxn := getDB()
@@ -726,7 +721,7 @@ func eventsHandler(writer http.ResponseWriter, req *http.Request) {
 	}
 
 	log.Status(TAG, "returning event log")
-	httputil.SendJSON(writer, http.StatusOK, struct{Events []*event}{events})
+	httputil.SendJSON(writer, http.StatusOK, struct{ Events []*event }{events})
 
 	if req.Method == "DELETE" {
 		log.Status(TAG, "clearing event log")
