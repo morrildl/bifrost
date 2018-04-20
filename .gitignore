@@ -1,5 +1,7 @@
 .*.swp
 *.ovpn
+*.json
 pgcert
-run/
 heimdall
+bifrost
+run/

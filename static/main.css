@@ -1,0 +1,36 @@
+body {
+  font-family: 'Roboto', sans-serif;
+  font-size: 12pt;
+}
+
+.logo {
+  max-height: 30px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.name-header {
+  font-size: 250%;
+  font-weight: 400;
+}
+
+.title-header {
+  font-size: 150%;
+  font-weight: 400;
+}
+
+h1 {
+  color: #ff4347;
+  font-size: 125%;
+  font-weight: bold;
+  padding-top: 0px;
+  margin: 0px;
+}
+
+h2 {
+  color: #555555;
+  font-size: 100%;
+  font-weight: bold;
+  padding-top: 0px;
+  margin: 0px;
+}

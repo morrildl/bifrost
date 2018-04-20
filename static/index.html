@@ -1,0 +1,409 @@
+<!doctype html>
+<html>
+<head>
+<base href="/"/>
+<meta charset="UTF-8"/>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+
+<!-- pin down the viewport, since we're a single-page app -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- prettify the UI w/ Roboto for typography, bulma.io for L&F, and Font Awesome for... icons -->
+<link href='https://fonts.googleapis.com/css?family=Roboto' rel='stylesheet' type='text/css'/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.7.0/css/bulma.min.css" rel="stylesheet" type="text/css"/>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet" type="text/css"/>
+<link href="/static/main.css" rel="stylesheet" type="text/css"/>
+
+<!-- Axios for XHR, Vue for UI -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.17.1/axios.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.16/vue.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue-router/3.0.1/vue-router.js" defer></script>
+<script src="/static/bifrost.js" defer></script>
+
+<!-- minified CDN scripts, for production -->
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.17.1/axios.min.js" defer></script> -->
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.3/vue.min.js" defer></script> -->
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/vue-router/3.0.1/vue-router.min.js" defer></script> -->
+
+<title></title>
+</style></head><body>
+
+<!-- component template definitions -->
+<div style="display: none;">
+
+  <!-- overlay indicating action in progress -->
+  <div class="modal is-active" id="waiting_modal" v-if="waiting">
+    <div class="modal-background"></div>
+    <!-- bulma's built-in modal-content class doesn't work b/c it is fixed width so doesn't play
+        nicely if you want a bubble smaller than that, so fake it -->
+    <div class="has-centered-text box" style="z-index: 99; font-size: 150%;">
+      {{ message }}
+    </div>
+  </div>
+  <!-- end overlay indicating action in progress -->
+
+  <!-- overlay indicating an error occurred -->
+  <div class="modal is-active" id="error_modal" v-if="active">
+    <div class="modal-background"></div>
+    <div class="box" style="z-index: 99; font-size: 150%;">
+      <!-- TODO: this is a more complicated layout so we can probably use a normal Bulma layout here -->
+      {{message}}<br/>
+      <pre style="font-family: sans-serif;" v-if="extra">{{extra}}</pre><br/>
+      <button v-if="recoverable" v-on:click="clear()" class="button is-primary">Dismiss</button>
+    </div>
+  </div>
+  <!-- end overlay indicating action in progress -->
+
+  <!-- navbar with admin-only Users/Settings entries -->
+  <div id="navbar">
+    <nav class="navbar" role="navigation">
+      <div class="navbar-brand" style="text-transform: uppercase; font-size: 125%;">
+        <router-link class="navbar-item" :to="globals.DefaultPath"><img class="logo" src="/static/logo.png" style="padding-right: 1em;"/>{{globals.ServiceName}}</router-link>
+      </div>
+      <div class="navbar-menu is-active">
+        <div class="navbar-start"></div>
+        <div class="navbar-end">
+          <div class="navbar-item" v-if="globals.IsAdmin"><div class="tabs is-toggle">
+            <router-link tag="li" class="is-tab" :class="{'is-active': $route.path.startsWith('/users')}" to="/users"><a>Users</a></router-link>
+            <router-link tag="li" class="is-tab" :class="{'is-active': $route.path == '/settings'}" to="/settings"><a>Settings</a></router-link>
+          </div></div>
+        </div>
+      </div>
+    </nav>
+  </div>
+  <!-- end navbar with admin-only Users/Settings entries -->
+
+  <!-- normal user view of their client certs -->
+  <div id="devices">
+    <div class="columns">
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <h1>Devices</h1>
+        <table class="table is-hoverable is-striped is-narrow is-fullwidth">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th class="has-text-right">Expiration</th>
+              <th class="has-text-right"></th>
+            </tr>
+          </thead>
+          <tr v-for="cert in certs">
+            <td>{{ cert.Desc }}</td>
+            <td class="has-text-right">{{ cert.Expiration }}</td>
+            <td class="has-text-right">
+              <a class="button is-danger is-outlined is-small" @click="revoke(cert.Fingerprint)">
+                <span>Deactivate</span>
+                <span class="icon is-small">
+                  <i class="fa fa-times"></i>
+                </span>
+              </a>
+            </td>
+          </tr>
+        </table>
+        <div class="content" v-if="certs.length < globals.MaxClients">
+          <p>You may configure up to {{ globals.MaxClients }} devices with VPN access.</p>
+          <div class="control">
+            <button class="button is-info" @click="addDevice()">Add Device</button>
+          </div>
+        </div>
+        <div class="content" v-if="certs.length >= globals.MaxClients">
+          <p>You have configured as many devices as you are allowed. To set up a new device with
+          VPN, you'll need to deactivate another, first.</p>
+        </div>
+        <p></p>
+      </div>
+      <div class="modal" :class="{'is-active': (victim != '')}">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">Really deactivate device?</p>
+            <button class="delete" aria-label="close" @click="cancelRevoke()"></button>
+          </header>
+          <section class="modal-card-body">
+            <div class="content">
+              <p>You are about to deactivate '{{ this.victimDesc }}'.</p>
+              <p>If you continue, this device will no longer be able to access the VPN. You'll
+              need to configure a new client certificate for it.</p>
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button" @click="cancelRevoke()">Cancel</button>
+            <button class="button is-success" @click="doRevoke(victim)">Deactivate</button>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- end normal user view of their client certs -->
+
+  <!-- normal user view to generate a new cert -->
+  <div id="new-device">
+    <div class="columns">
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <h1>Add a device</h1>
+        <div class="content">
+          <p>
+            You can set up {{ globals.ServiceName }} service on any device with OpenVPN software
+            that can read <code>.ovpn</code> files.
+          </p> 
+          <ul>
+            <li>
+               The free OpenVPN Connect client is available for <a
+               href="https://itunes.apple.com/us/app/openvpn-connect/id590379981?mt=8">iOS</a>
+               and <a href="https://play.google.com/store/apps/details?id=net.openvpn.openvpn&hl=en_US">Android</a>.
+            </li>
+            <li>For Macs, the free <a href="https://tunnelblick.net/downloads.html">Tunnelblick</a> works well.</li>
+            <li>Most Linux distributions provide OpenVPN packages that can use <code>.ovpn</code> files.</li>
+          </ul>
+          <p>To continue, enter a short name for this device.</p>
+          <p class="content is-small">
+            Note: When you add a new device, we strongly recommend that you do so <b>using the device itself.</b>
+            This ensures that the <code>.ovpn</code> file downloads directly to the device where it will be used.
+          </p>
+          <div class="field has-addons">
+            <div class="control has-icons-left is-expanded">
+              <input class="input" type="text" placeholder="'main laptop'; 'Essential PH-1'; 'Bob'" v-model="desc"></input>
+              <span class="icon is-small is-left"><i class="fa fa-laptop"></i></span>
+            </div>
+            <div class="control">
+              <button class="button is-info" @click="generateCert()">Continue</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal" :class="{'is-active': pendingServer}">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title" v-if="ovpn == ''">Generating configuration...</p>
+            <p class="modal-card-title" v-if="ovpn != ''">Save <code>.ovpn</code> file</p>
+          </header>
+          <section class="modal-card-body">
+            <div class="content" v-if="ovpn == ''">
+              Please wait a moment while the server prepares your configuration file.
+            </div>
+            <div class="content" v-if="ovpn != ''">
+              <p>Your new device configuration file for '{{ desc }}' is ready.</p>
+              <p>Once you've saved it to your device, you can open it using your client software.</p>
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button is-success" @click="saveFile()" :disabled="ovpn == ''">Save File</button>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- end normal user view to generate a new cert -->
+
+  <!-- admin form to edit system settings -->
+  <div id="settings">
+    <div class="columns">
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <div class="columns"><!-- non-mobile columns here, so that user list stacks below settings on phones -->
+          <div class="column is-6">
+            <h1>{{globals.ServiceName}} Settings</h1>
+            <div class="field">
+              <div class="label">Name of this VPN service</div>
+              <div class="control has-icons-left">
+                <input class="input" type="text" placeholder="Bifröst VPN" v-model="serviceName"></input>
+                <span class="icon is-small is-left"><i class="fa fa-tag"></i></span>
+              </div>
+              <p class="help">This is the name users will see in the app.</p>
+            </div>
+
+            <div class="field">
+              <div class="label">Maximum certificates per user</div>
+              <div class="control has-icons-left">
+                <input class="input" type="text" placeholder="2" v-model="clientLimit"></input>
+                <span class="icon is-small is-left"><i class="fa fa-clone"></i></span>
+              </div>
+              <p class="help">Users will be able to connect up to this many devices.</p>
+            </div>
+
+            <div class="field">
+              <div class="label">Refresh period</div>
+              <div class="control has-icons-left">
+                <input class="input" type="text" placeholder="90" v-model="clientCertDuration"></input>
+                <span class="icon is-small is-left"><i class="fa fa-calendar"></i></span>
+              </div>
+              <p class="help">This sets the validity period of certificates, in days.</p>
+            </div>
+
+            <div class="field">
+              <div class="label">Approved domains</div>
+              <div class="control">
+                <textarea class="textarea" v-model="whitelistedDomains" placeholder="playground.global
+sententio.us"></textarea>
+              </div>
+              <p class="help">Users with Google accounts in one of these domains will be able to set up
+              access with no action on your part.</p>
+            </div>
+
+            <div class="field is-grouped">
+              <div class="control">
+                <button class="button" @click="cancel()">Cancel</button>
+              </div>
+              <div class="control">
+                <button class="button is-link" @click="submit()">Submit</button>
+              </div>
+            </div>
+          </div>
+          <div class="column is-6">
+            <user-whitelist :globals="globals"></user-whitelist>
+          </div>
+        </div><!-- end non-mobile columns -->
+      </div>
+    </div>
+  </div>
+  <!-- end admin form to edit system settings -->
+
+  <!-- user whitelist display/edit; usually a sub-component of settings -->
+  <div id="user-whitelist">
+    <div>
+      <h1>User Access Whitelist</h1>
+      <div class="help">These users have access even if their account is not in an approved domain.</div>
+      <table class="table is-hoverable is-fullwidth is-striped">
+        <tr v-for="u in users">
+          <td>{{u}}</td>
+          <td>
+            <a class="button is-danger is-outlined is-small" @click="remove(u)">
+              <span>Remove</span>
+              <span class="icon is-small">
+                <i class="fa fa-times"></i>
+              </span>
+            </a>
+          </td>
+        </tr>
+      </table>
+      <div v-if="users.length < 1"><i>No users have been whitelisted yet.</i></div>
+      <div class="field has-addons">
+        <div class="control has-icons-left is-expanded">
+          <input class="input" type="text" placeholder="user@domain.tld" v-model="whitelistAdd"></input>
+          <span class="icon is-small is-left"><i class="fa fa-user"></i></span>
+        </div>
+        <div class="control">
+          <button class="button is-info" @click="addUser()">Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- end user whitelist display/edit; usually a sub-component of settings -->
+
+  <!-- admin UI showing a list of all users -->
+  <div id="users">
+    <div class="columns">
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <h1>Current Users &amp; Devices</h1>
+        <table class="table is-hoverable is-striped is-fullwidth is-narrow">
+          <thead>
+            <tr>
+              <th>User email</th>
+              <th class="has-text-right"><abbr title="Active Devices">Active</abbr></th>
+              <th class="has-text-right"><abbr title="Inactive (Revoked/Expired) Certificates">Inactive</abbr></th>
+              <th class="has-text-right"></th>
+            </tr>
+          </thead>
+          <tr v-for="user in users">
+            <td>{{user.Email}}</td>
+            <td class="has-text-right">{{user.ActiveCerts}}</td>
+            <td class="has-text-right">{{user.InactiveCerts}}</td>
+            <td class="has-text-right">
+              <a class="button is-info is-outlined is-small" @click="details(user.Email)">
+                <span>Details</span>
+                <span class="icon is-small">
+                  <i class="fa fa-info-circle"></i>
+                </span>
+              </a>
+            </td>
+          </tr>
+        </table>
+        <div v-if="users.length < 1"><i>There are currently no users of this service.</i></div>
+      </div>
+    </div>
+  </div>
+  <!-- end admin UI showing a list of all users -->
+
+  <!-- unauthorized: displayed when the current user is not allowed to access the VPN -->
+  <div id="sorry">
+    <div class="columns"><div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+      <h1>Not Allowed</h1>
+      <p>Sorry! The administrator for {{ globals.ServiceName }} has not granted you access to this
+      service.</p>
+      <p>If you believe this is a mistake, please contact your administrator.</p>
+    </div></div>
+  </div>
+  <!-- end unauthorized: displayed when the current user is not allowed to access the VPN -->
+
+  <!-- admin view of user details -->
+  <div id="user-details">
+    <div class="columns">
+      <div class="modal" :class="{ 'is-active': showConfirm }">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">Really reset {{ this.email }}?</p>
+            <button class="delete" aria-label="close" @click="showConfirm = false;"></button>
+          </header>
+          <section class="modal-card-body">
+            <div class="content">
+              <p>You are about to reset {{ this.email }}.</p>
+              <p>If you continue, this will revoke all of the user's certificates and clear their
+              two-factor credentials. This will disable the user's VPN access, until they
+              reset their credentials.</p>
+              <p>The user will need to visit {{ globals.ServiceName }} from your local on-site
+              network to set up new two-factor credentials and generate new device
+              certificates.</p>
+              <p>Please note: resetting a user <b>will not</b> prevent them from setting up
+              access again, as long as they are in an approved domain or are whitelisted.</p>
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button" @click="showConfirm = false;">Cancel</button>
+            <button class="button is-success" @click="doDeleteUser()">Reset</button>
+          </footer>
+        </div>
+      </div>
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <h1>Devices for {{ email }}</h1>
+        <table class="table is-striped is-hoverable is-narrow is-fullwidth">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th class="has-text-right">Expiration</th>
+              <th class="has-text-right"></th>
+            </tr>
+          </thead>
+          <tr v-for="cert in activeCerts">
+            <td>{{cert.Desc}}</td>
+            <td class="has-text-right">{{cert.Expiration}}</td>
+            <td class="has-text-right">
+              <a class="button is-danger is-outlined is-small" @click="revoke(cert.Fingerprint)">
+                <span>Deactivate</span>
+                <span class="icon is-small">
+                  <i class="fa fa-times"></i>
+                </span>
+              </a>
+            </td>
+          </tr>
+        </table>
+
+        <a class="button is-danger is-outlined" @click="deleteUser()">
+          <span>Reset User</span>
+          <span class="icon is-small">
+            <i class="fa fa-times"></i>
+          </span>
+        </a>
+      </div>
+    </div>
+  </div>
+  <!-- end admin view of user details -->
+
+</div><!-- end templates definition (i.e. end 'display: none;' block) -->
+
+<div id="bifrost-root">
+  <navbar></navbar>
+  <router-view></router-view>
+</div>
+
+</body>
+</html>
