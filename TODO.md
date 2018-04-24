@@ -2,6 +2,8 @@
 
 ## Servers
 * [bifrost] Connect bifrost to heimdall
+* [bifrost] Review API endpoints for permissions checks
+* [bifrost] Add a UI gate to warn users their password isn't set
 * [heimdall] Add `log.Status` messages
 * [bifrost] Add `log.Status` messages
 

@@ -8,7 +8,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
+	"image/png"
 	"io/ioutil"
 	"math/big"
 	"net/http"
@@ -125,7 +127,11 @@ func loadSettings() *settings {
 					panic(err)
 				}
 			case "WhitelistedDomains":
-				ret.WhitelistedDomains = strings.Split(v, " ")
+				for _, d := range strings.Split(v, " ") {
+					if d != "" {
+						ret.WhitelistedDomains = append(ret.WhitelistedDomains, d)
+					}
+				}
 				sort.Strings(ret.WhitelistedDomains)
 			default:
 			}
@@ -138,9 +144,9 @@ func loadSettings() *settings {
 		var email string
 		for rows.Next() {
 			rows.Scan(&email)
-		}
-		if email != "" {
-			ret.WhitelistedUsers = append(ret.WhitelistedUsers, email)
+			if email != "" {
+				ret.WhitelistedUsers = append(ret.WhitelistedUsers, email)
+			}
 		}
 	}
 	log.Debug("loadSettings", *ret)
@@ -359,8 +365,17 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 		q = "insert into events (event, email, value) values (?, ?, ?)"
 		writeDatabaseByQuery(q, "user TOTP seed updated/created", chunks[2], "")
 
+		var buf bytes.Buffer
+		img, err := key.Image(200, 200)
+		if err != nil {
+			panic(err)
+		}
+		png.Encode(&buf, img)
+		imageURL := base64.StdEncoding.EncodeToString(buf.Bytes())
+		imageURL = fmt.Sprintf("data:image/png;base64,%s", imageURL)
+
 		log.Status(TAG, "success")
-		httputil.SendJSON(writer, http.StatusOK, &res{chunks[2], key.URL()})
+		httputil.SendJSON(writer, http.StatusOK, &res{chunks[2], imageURL})
 		return
 	}
 
@@ -410,7 +425,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 	//   Note: if email has no TOTP but does have certs, Created is ""
 	// POST /certs/<email> -- create a certificate for the indicated user
 	//   I: {Email: "", Description: ""}
-	//   O: application/ovpn (only if 201)
+	//   O: {OVPNDataURL: ""} // Note: represented as the base64-encoded value of a data: href
 	//   201: created; 400 (bad request): missing email or description;
 	//   401 (unauthorized): user is already at cert limit
 	// Non-GET: 409 (bad method)
@@ -478,7 +493,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 				return
 			}
 		} else { // i.e. /certs/<something> -- means fetch a particular user
-			q := "select t.created, c.fingerprint, c.created, c.expires, c.revoked, c.desc from totp as t, certs as c where t.email=c.email and t.email=?"
+			q := "select t.created, c.fingerprint, c.created, c.expires, c.desc, c.revoked from totp as t left join certs as c on t.email=c.email where t.email=?"
 			cxn := getDB()
 			defer cxn.Close()
 			if rows, err := cxn.Query(q, email); err != nil {
@@ -488,10 +503,14 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 				res := struct {
 					Email, Created            string
 					ActiveCerts, RevokedCerts []cert
-				}{Email: email}
+				}{Email: email, ActiveCerts: []cert{}, RevokedCerts: []cert{}}
 				for rows.Next() {
 					c := cert{}
-					rows.Scan(&res.Created, &c.Fingerprint, &c.Created, &c.Expires, &c.Revoked, &c.Description)
+					rows.Scan(&res.Created, &c.Fingerprint, &c.Created, &c.Expires, &c.Description, &c.Revoked)
+					if c.Fingerprint == "" {
+						// can happen if the user has TOTP and no certs, as a consequence of the left join; avoiding putting it in response
+						continue
+					}
 					if c.Revoked == "" {
 						res.ActiveCerts = append(res.ActiveCerts, c)
 					} else {
@@ -505,7 +524,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 				}
 				sort.Slice(res.ActiveCerts, func(i, j int) bool { return res.ActiveCerts[i].Description < res.ActiveCerts[j].Description })
 				sort.Slice(res.RevokedCerts, func(i, j int) bool { return res.RevokedCerts[i].Description < res.RevokedCerts[j].Description })
-				log.Status(TAG, "success", email)
+				log.Status(TAG, "success", email, res.Email, res)
 				httputil.SendJSON(writer, http.StatusOK, &res)
 				return
 			}
@@ -617,7 +636,10 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 
 		// transmit to client
 		log.Status(TAG, "issued new certificate", email, fp)
-		httputil.Send(writer, http.StatusCreated, "application/ovpn", ovpn.Bytes())
+
+		dataURL := base64.StdEncoding.EncodeToString(ovpn.Bytes())
+		dataURL = fmt.Sprintf("data:image/ovpn;base64,%s", dataURL)
+		httputil.SendJSON(writer, http.StatusCreated, struct{ OVPNDataURL string }{dataURL})
 
 		return
 	}
@@ -630,7 +652,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 func certHandler(writer http.ResponseWriter, req *http.Request) {
 	// GET /cert/<fingerprint> -- fetch details for the indicated cert
 	//   I: None
-	//   O: {Fingerprint: "", Created: "", Expires: "", Revoked: "", Description: ""}
+	//   O: {Email: "", Fingerprint: "", Created: "", Expires: "", Revoked: "", Description: ""}
 	//   200: the object above; 404: no such fingerprint
 	// DELETE /cert/<fingerprint> -- revoke the indicated cert
 	//   I: None

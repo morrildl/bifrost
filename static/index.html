@@ -63,9 +63,11 @@
       <div class="navbar-menu is-active">
         <div class="navbar-start"></div>
         <div class="navbar-end">
-          <div class="navbar-item" v-if="globals.IsAdmin"><div class="tabs is-toggle">
-            <router-link tag="li" class="is-tab" :class="{'is-active': $route.path.startsWith('/users')}" to="/users"><a>Users</a></router-link>
-            <router-link tag="li" class="is-tab" :class="{'is-active': $route.path == '/settings'}" to="/settings"><a>Settings</a></router-link>
+          <div class="navbar-item"><div class="tabs is-toggle">
+            <router-link tag="li" v-if="globals.IsAdmin" class="is-tab" :class="{'is-active': $route.path.startsWith('/users')}" to="/users"><a>All Users</a></router-link>
+            <router-link tag="li" v-if="globals.IsAllowed" class="is-tab" :class="{'is-active': $route.path.startsWith('/devices')}" to="/devices"><a>My Devices</a></router-link>
+            <router-link tag="li" v-if="globals.IsAllowed" class="is-tab" :class="{'is-active': $route.path == '/password'}" to="/password"><a>My Password</a></router-link>
+            <router-link tag="li" v-if="globals.IsAdmin" class="is-tab" :class="{'is-active': $route.path == '/settings'}" to="/settings"><a>Settings</a></router-link>
           </div></div>
         </div>
       </div>
@@ -87,8 +89,8 @@
             </tr>
           </thead>
           <tr v-for="cert in certs">
-            <td>{{ cert.Desc }}</td>
-            <td class="has-text-right">{{ cert.Expiration }}</td>
+            <td>{{ cert.Description }}</td>
+            <td class="has-text-right">{{ cert.Expires }}</td>
             <td class="has-text-right">
               <a class="button is-danger is-outlined is-small" @click="revoke(cert.Fingerprint)">
                 <span>Deactivate</span>
@@ -99,6 +101,9 @@
             </td>
           </tr>
         </table>
+        <div class="content" v-if="certs.length == 0">
+          <i>You have no devices configured right now.</i>
+        </div>
         <div class="content" v-if="certs.length < globals.MaxClients">
           <p>You may configure up to {{ globals.MaxClients }} devices with VPN access.</p>
           <div class="control">
@@ -116,7 +121,7 @@
         <div class="modal-card">
           <header class="modal-card-head">
             <p class="modal-card-title">Really deactivate device?</p>
-            <button class="delete" aria-label="close" @click="cancelRevoke()"></button>
+            <button class="delete" aria-label="close" @click="clearRevoke()"></button>
           </header>
           <section class="modal-card-body">
             <div class="content">
@@ -126,7 +131,7 @@
             </div>
           </section>
           <footer class="modal-card-foot">
-            <button class="button" @click="cancelRevoke()">Cancel</button>
+            <button class="button" @click="clearRevoke()">Cancel</button>
             <button class="button is-success" @click="doRevoke(victim)">Deactivate</button>
           </footer>
         </div>
@@ -187,7 +192,7 @@
             </div>
           </section>
           <footer class="modal-card-foot">
-            <button class="button is-success" @click="saveFile()" :disabled="ovpn == ''">Save File</button>
+            <a class="button is-success" @click="done()" :disabled="ovpn == ''" :href="ovpn" :download="filename">Save File</a>
           </footer>
         </div>
       </div>
@@ -298,15 +303,15 @@ sententio.us"></textarea>
           <thead>
             <tr>
               <th>User email</th>
-              <th class="has-text-right"><abbr title="Active Devices">Active</abbr></th>
-              <th class="has-text-right"><abbr title="Inactive (Revoked/Expired) Certificates">Inactive</abbr></th>
+              <th class="has-text-right"><abbr title="Current Devices">Devices</abbr></th>
+              <!-- <th class="has-text-right"><abbr title="Inactive (Revoked/Expired) Certificates">Inactive</abbr></th> -->
               <th class="has-text-right"></th>
             </tr>
           </thead>
           <tr v-for="user in users">
             <td>{{user.Email}}</td>
             <td class="has-text-right">{{user.ActiveCerts}}</td>
-            <td class="has-text-right">{{user.InactiveCerts}}</td>
+            <!-- <td class="has-text-right">{{user.InactiveCerts}}</td> -->
             <td class="has-text-right">
               <a class="button is-info is-outlined is-small" @click="details(user.Email)">
                 <span>Details</span>
@@ -337,29 +342,27 @@ sententio.us"></textarea>
   <!-- admin view of user details -->
   <div id="user-details">
     <div class="columns">
-      <div class="modal" :class="{ 'is-active': showConfirm }">
+      <div class="modal" :class="{ 'is-active': showDeleteConfirm }">
         <div class="modal-background"></div>
         <div class="modal-card">
           <header class="modal-card-head">
             <p class="modal-card-title">Really reset {{ this.email }}?</p>
-            <button class="delete" aria-label="close" @click="showConfirm = false;"></button>
+            <button class="delete" aria-label="close" @click="cancelDeleteUser()"></button>
           </header>
           <section class="modal-card-body">
             <div class="content">
               <p>You are about to reset {{ this.email }}.</p>
-              <p>If you continue, this will revoke all of the user's certificates and clear their
-              two-factor credentials. This will disable the user's VPN access, until they
-              reset their credentials.</p>
+              <p>If you continue, this will deactivate all of the user's devices and clear their
+              password.</p>
               <p>The user will need to visit {{ globals.ServiceName }} from your local on-site
-              network to set up new two-factor credentials and generate new device
-              certificates.</p>
+              network to set up a new password and reactivate devices.</p>
               <p>Please note: resetting a user <b>will not</b> prevent them from setting up
               access again, as long as they are in an approved domain or are whitelisted.</p>
             </div>
           </section>
           <footer class="modal-card-foot">
-            <button class="button" @click="showConfirm = false;">Cancel</button>
-            <button class="button is-success" @click="doDeleteUser()">Reset</button>
+            <button class="button" @click="cancelDeleteUser()">Cancel</button>
+            <button class="button is-danger" @click="doDeleteUser()">Reset</button>
           </footer>
         </div>
       </div>
@@ -374,8 +377,8 @@ sententio.us"></textarea>
             </tr>
           </thead>
           <tr v-for="cert in activeCerts">
-            <td>{{cert.Desc}}</td>
-            <td class="has-text-right">{{cert.Expiration}}</td>
+            <td>{{cert.Description}}</td>
+            <td class="has-text-right">{{cert.Expires}}</td>
             <td class="has-text-right">
               <a class="button is-danger is-outlined is-small" @click="revoke(cert.Fingerprint)">
                 <span>Deactivate</span>
@@ -386,7 +389,9 @@ sententio.us"></textarea>
             </td>
           </tr>
         </table>
-
+        <div class="content" v-if="activeCerts.length < 1">
+          <i>This user currently has no configured devices.</i>
+        </div>
         <a class="button is-danger is-outlined" @click="deleteUser()">
           <span>Reset User</span>
           <span class="icon is-small">
@@ -394,9 +399,102 @@ sententio.us"></textarea>
           </span>
         </a>
       </div>
+      <div class="modal" :class="{'is-active': showRevokeConfirm}">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">Really deactivate device?</p>
+            <button class="delete" aria-label="close" @click="clearRevoke()"></button>
+          </header>
+          <section class="modal-card-body">
+            <div class="content">
+              If you continue, {{ email }} will no longer be able to access {{ globals.ServiceName
+              }} using '{{ revocationVictimDesc }}'. 
+            </div>
+            <div class="content">
+              The user will need to visit this service again in order to reactivate this device.
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button" @click="clearRevoke()">Cancel</button>
+            <button class="button is-danger" @click="doRevoke()">Deactivate Device</button>
+          </footer>
+        </div>
+      </div>
+
     </div>
   </div>
   <!-- end admin view of user details -->
+
+  <!-- normal user view to generate TOTP seed -->
+  <div id="totp">
+    <div class="columns">
+      <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+        <h1>Set your password</h1>
+        <div class="content">
+          <div v-if="!configured">
+            <p>
+              You need to set up a password app on your phone to use {{ globals.ServiceName }}.
+              This app will generate a "one-time password" that changes each time you log in to the
+              VPN.
+            </p>
+            <p>
+              You can use any app that supports TOTP, but your best bet is to use Google
+              Authenticator on <a
+              href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en_US">Android</a>
+              or <a
+              href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iPhone</a>.
+            </p> 
+            <p>
+              When you've installed that app, click the button below. This will display a barcode
+              you can scan with the phone app to set up your password.
+            </p>
+          </div>
+          <div v-if="configured">
+            <p>
+              If you've lost, reset, or switched your phone, you'll need to reconfigure your {{
+              globals.ServiceName }} password. To do so, simply click the button below and scan
+              the new barcode it creates, using your
+              <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en_US">Android</a>
+              or <a
+              href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iPhone</a>
+              app.
+            </p>
+            <p>
+              Please be aware that if you reset your password, the old one will stop working. You
+              may only have one device configured at a time.
+            </p> 
+          </div>
+          <div class="field">
+            <div class="control">
+              <button class="button is-info" @click="reset()">Set Password</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal" :class="{'is-active': pendingServer}">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">Configure password</p>
+          </header>
+          <section class="modal-card-body">
+            <div class="content" v-if="imgURL == ''">
+              Please wait while the server prepares your new password configuration.
+            </div>
+            <div class="content" v-if="imgURL != ''">
+              <p>Scan the barcode below using your phone app.</p>
+              <img :src="imgURL"/>
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button is-success" @click="done()" :disabled="imgURL == ''">Done</button>
+          </footer>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- end normal user view to generate TOTP seed -->
 
 </div><!-- end templates definition (i.e. end 'display: none;' block) -->
 

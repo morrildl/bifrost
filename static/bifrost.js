@@ -14,6 +14,7 @@ function str(s) {
 
 const globals = {
   IsAdmin: false,
+  IsAllowed: false,
   ServiceName: "Bifröst VPN",
   MaxClients: 2,
   DefaultPath: "",
@@ -80,7 +81,6 @@ const users = Vue.component('users', {
   },
   methods: {
     "details": function(email) {
-      console.log('deets ' + email);
       this.$router.push("/users/" + email);
     },
   },
@@ -225,7 +225,7 @@ const devices = Vue.component('devices', {
       this.victimDesc = "";
       for (let c of this.certs) {
         if (c.Fingerprint == fingerprint) {
-          this.victimDesc = c.Desc;
+          this.victimDesc = c.Description;
           break;
         }
       }
@@ -283,21 +283,18 @@ const newDevice = Vue.component('new-device', {
       "ovpn": "",
     };
   },
+  computed: {
+    "filename": function() {
+      return this.desc + ".ovpn";
+    },
+  },
   methods: {
     "generateCert": function() {
-      let payload = { "Desc": this.desc };
+      let payload = { "Description": this.desc };
       this.pendingServer = true;
       axios.post("/api/certs", json=payload).then((res) => {
         if (res.data.Artifact != null) {
-
-          // TODO: timeout here is a dev-time kludge
-          let self = this;
-          let ovpn = res.data.Artifact.OVPN;
-          setTimeout(function() {
-            self.ovpn = ovpn;
-          }, 4000);
-          // TODO: timeout here is a dev-time kludge
-
+          this.ovpn = res.data.Artifact.OVPNDataURL;
         }
         // TODO: error
       }).catch((err) => {
@@ -306,9 +303,11 @@ const newDevice = Vue.component('new-device', {
         this.$router.push(globals.DefaultPath);
       });
     },
-    "saveFile": function() {
-      // TODO: do the data: URL download dance
-      this.$router.push("/devices");
+    "done": function() {
+      this.pendingServer = false;
+      this.ovpn = "";
+      this.desc = "";
+      this.$router.push(globals.DefaultPath);
     },
   },
 });
@@ -319,20 +318,20 @@ const userDetails = Vue.component('user-details', {
   data: function() {
     return {
       "activeCerts": [],
-      "showConfirm": false,
+      "showDeleteConfirm": false,
+      "showRevokeConfirm": false,
+      "revocationVictim": "",
+      "revocationVictimDesc": "",
     };
   },
   methods: {
-    "revoke": function(fingerprint) {
-      // TODO
-      console.log("revoke " + fingerprint);
-    },
     "deleteUser": function() {
-      console.log("deleteUser " + this.email);
-      this.showConfirm = true;
+      this.showDeleteConfirm = true;
+    },
+    "cancelDeleteUser": function() {
+      this.showDeleteConfirm = false;
     },
     "doDeleteUser": function() {
-      console.log("doDeleteUser " + this.email);
       axios.delete("/api/users/" + this.email).then((res) => {
         if (res.data.Artifact != null) {
           this.$router.replace(this.globals.DefaultPath);
@@ -344,11 +343,72 @@ const userDetails = Vue.component('user-details', {
         console.log(err);
       });   
     },
+    "revoke": function(fingerprint) {
+      this.revocationVictimDesc = "";
+      for (let c of this.activeCerts) {
+        if (c.Fingerprint == fingerprint) {
+          this.revocationVictimDesc = c.Description;
+          break;
+        }
+      }
+      if (this.revocationVictimDesc != "") {
+        this.revocationVictim = fingerprint;
+      } else {
+        console.log("error, could not find revocation victim");
+      }
+
+      this.showRevokeConfirm = true;
+    },
+    "clearRevoke": function() {
+      this.revocationVictim = "";
+      this.revocationVictimDesc = "";
+      this.showRevokeConfirm = false;
+    },
+    "doRevoke": function() {
+      axios.delete("/api/certs/" + this.revocationVictim).then((res) => {
+        if (res.data.Artifact != null) {
+          this.clearRevoke();
+          this.loadUserCerts();
+        } else {
+          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        }
+      }).catch((err) => {
+        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        console.log(err);
+      });   
+    },
+    "loadUserCerts": function() {
+      axios.get("/api/users/" + this.email).then((res) => {
+        if (res.data.Artifact != null) {
+          this.activeCerts = res.data.Artifact.ActiveCerts;
+        } else {
+          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        }
+      }).catch((err) => {
+        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        console.log(err);
+      });   
+    },
   },
   mounted: function() {
-     axios.get("/api/users/" + this.email).then((res) => {
+    this.loadUserCerts();
+  },
+});
+
+const totp = Vue.component('password', {
+  template: "#totp",
+  props: [ "globals" ],
+  data: function() {
+    return {
+      "configured": false,
+      "pendingServer": false,
+      "imgURL": "",
+    };
+  },
+  mounted: function() {
+     axios.get("/api/totp").then((res) => {
       if (res.data.Artifact != null) {
-        this.activeCerts = res.data.Artifact.ActiveCerts;
+        this.configured = res.data.Artifact.Configured;
       } else {
         //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
       }
@@ -356,6 +416,26 @@ const userDetails = Vue.component('user-details', {
       //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
       console.log(err);
     });   
+  },
+  methods: {
+    "reset": function() {
+      this.pendingServer = true;
+      axios.post("/api/totp").then((res) => {
+        if (res.data.Artifact != null) {
+          this.imgURL = res.data.Artifact.ImageURL;
+        } else {
+          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        }
+      }).catch((err) => {
+        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        console.log(err);
+      });   
+    },
+    "done": function() {
+      this.pendingServer = false;
+      this.imgURL = "";
+      this.configured = true;
+    },
   },
 });
 
@@ -369,6 +449,7 @@ const router = new VueRouter({
     { path: "/settings", component: settings, props: {globals: globals} },
     { path: "/devices", component: devices, props: {globals: globals} },
     { path: "/newdevice", component: newDevice, props: {globals: globals} },
+    { path: "/password", component: totp, props: {globals: globals} },
   ]
 });
 
@@ -387,9 +468,8 @@ Vue.component('navbar', {
         globals.IsAdmin = res.data.Artifact.IsAdmin;
         globals.MaxClients = res.data.Artifact.MaxClients;
         globals.DefaultPath = str(res.data.Artifact.DefaultPath);
+        globals.IsAllowed = globals.DefaultPath != "/sorry";
 
-        console.log(this.$router.path);
-        console.log(globals.DefaultPath);
         if (str(this.$router.path) == "/" || str(this.$router.path) == "") {
           this.$router.replace(globals.DefaultPath);
         }
