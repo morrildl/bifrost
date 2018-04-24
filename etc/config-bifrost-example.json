@@ -1,0 +1,31 @@
+{
+  "Debug": true,
+  "Port": 9000,
+  "BindAddress": "",
+  "LogFile": "",
+  "APIServerURL": "https://localhost:9090",
+  "StaticContent": "./static",
+  "AdminUsers": [ "morrildl@playground.global" ],
+  "Session": {
+    "SessionCookieID": "PlaygroundSessionID",
+    "OAuth": {
+      "Issuer": "accounts.google.com",
+      "ClientID": "<client ID>",
+      "ClientSecret": "<client secret>",
+      "RedirectURL": "http://localhost:9000/oauth",
+      "RedirectPath": "/oauth",
+      "Scopes": ["openid", "email"],
+      "AuthURL": "https://accounts.google.com/o/oauth2/auth",
+      "TokenExchangeURL": "https://www.googleapis.com/oauth2/v3/token",
+      "JWTPubKeyURL": "https://www.googleapis.com/oauth2/v1/certs",
+      "ValidEmailRegex": ".*"
+    }
+  },
+  "APIClient": {
+    "ClientCertFile": "./client.crt",
+    "ClientKeyFile": "./client.key",
+    "SelfSignedServerCertFile": "./server.crt",
+    "APISecretHeader": "X-Playground-Api-Secret",
+    "APISecretValue": ""
+  }
+}

@@ -35,7 +35,6 @@ type serverConfig struct {
 	Debug                    bool
 	Port                     int
 	BindAddress              string
-	APISecret                string
 	LogFile                  string
 	SQLiteDBFile             string
 	SelfSignedClientCertFile string
@@ -45,16 +44,14 @@ type serverConfig struct {
 	CAKeyFile                string
 	CAKeyPassword            string
 	TLSAuthFile              string
-	IssuedCertDuration       int
 	OVPNTemplateFile         string
-	ServiceName              string
+	API                      *httputil.ConfigType
 }
 
 var cfg = &serverConfig{
 	false,
-	9000,
+	9090,
 	"127.0.0.1",
-	"GJALLARHOOOOOOOOOOOOOOORN!",
 	"./heimdall.log",
 	"./heimdall.sqlite3",
 	"./client.crt",
@@ -62,11 +59,10 @@ var cfg = &serverConfig{
 	"./server.key",
 	"./ca.crt",
 	"./ca.key",
-	"whatever",
+	"Sekr1tPassw0rd!",
 	"./tls-auth.pem",
-	365,
-	"./ovpn.tmpl",
-	"Playground VPN",
+	"./template.ovpn",
+	&httputil.Config,
 }
 
 func initConfig(cfg *serverConfig) {
@@ -92,16 +88,76 @@ func getDB() *sql.DB {
 	return cxn
 }
 
-func writeDatabaseByQuery(query string, params ...interface{}) {
+type settings struct {
+	ServiceName                     string
+	ClientLimit, IssuedCertDuration int
+	WhitelistedDomains              []string
+	WhitelistedUsers                []string `json:",omitEmpty"`
+}
+
+func loadSettings() *settings {
 	cxn := getDB()
 	defer cxn.Close()
 
-	/*
-		casted := make([]interface{}, len(params))
-		for i, s := range params {
-			casted[i] = s
+	ret := &settings{"Bifröst VPN", 2, 90, []string{}, []string{}}
+
+	if rows, err := cxn.Query("select key, value from settings"); err != nil {
+		panic(err)
+	} else {
+		defer rows.Close()
+		var k, v string
+		for rows.Next() {
+			rows.Scan(&k, &v)
+			log.Debug("loadSettings", fmt.Sprintf("'%s'='%s'", k, v))
+			switch k {
+			case "ServiceName":
+				ret.ServiceName = v
+			case "ClientLimit":
+				if tmp, err := strconv.ParseInt(v, 10, 32); err == nil {
+					ret.ClientLimit = int(tmp)
+				} else {
+					panic(err)
+				}
+			case "IssuedCertDuration":
+				if tmp, err := strconv.ParseInt(v, 10, 32); err == nil {
+					ret.IssuedCertDuration = int(tmp)
+				} else {
+					panic(err)
+				}
+			case "WhitelistedDomains":
+				ret.WhitelistedDomains = strings.Split(v, " ")
+				sort.Strings(ret.WhitelistedDomains)
+			default:
+			}
 		}
-	*/
+	}
+	if rows, err := cxn.Query("select email from whitelist order by email"); err != nil {
+		panic(err)
+	} else {
+		defer rows.Close()
+		var email string
+		for rows.Next() {
+			rows.Scan(&email)
+		}
+		if email != "" {
+			ret.WhitelistedUsers = append(ret.WhitelistedUsers, email)
+		}
+	}
+	log.Debug("loadSettings", *ret)
+	return ret
+}
+
+func storeSettings(s *settings) {
+	log.Debug("storeSettings", *s)
+	writeDatabaseByQuery("insert or replace into settings (key, value) values (?, ?)", "ServiceName", s.ServiceName)
+	writeDatabaseByQuery("insert or replace into settings (key, value) values (?, ?)", "IssuedCertDuration", s.IssuedCertDuration)
+	writeDatabaseByQuery("insert or replace into settings (key, value) values (?, ?)", "ClientLimit", s.ClientLimit)
+	writeDatabaseByQuery("insert or replace into settings (key, value) values (?, ?)", "WhitelistedDomains", strings.Join(s.WhitelistedDomains, " "))
+}
+
+func writeDatabaseByQuery(query string, params ...interface{}) {
+	cxn := getDB()
+	defer cxn.Close()
 
 	_, err := cxn.Exec(query, params...)
 	if err != nil {
@@ -118,58 +174,23 @@ func makeCertSerial() string {
 	return fmt.Sprintf("%x", newSerial)
 }
 
-func apiWrap(methods []string, cb func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
-	return func(writer http.ResponseWriter, req *http.Request) {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Warn("server", "panic in handler", r)
-				httputil.SendJSON(writer, http.StatusInternalServerError, struct{}{})
-			}
-		}()
-
-		provided, ok := req.Header["X-Playground-Api-Secret"]
-		if !ok || len(provided) != 1 {
-			log.Warn("apiWrap", "missing or multivalued API secret", req.URL.Path)
-			httputil.SendJSON(writer, http.StatusForbidden, struct{}{})
-			return
-		}
-		if provided[0] != cfg.APISecret {
-			log.Warn("apiWrap", "bad API secret")
-			httputil.SendJSON(writer, http.StatusForbidden, struct{}{})
-			return
-		}
-
-		allowed := false
-		for _, method := range methods {
-			if method == req.Method {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			log.Warn("apiWrap", "disallowed HTTP method", req.URL.Path, req.Method)
-			httputil.SendJSON(writer, http.StatusMethodNotAllowed, struct{}{})
-			return
-		}
-
-		cb(writer, req)
-	}
-}
-
 /*
  * Main loop which starts the HTTP server & defines handlers
  */
 func main() {
 	initConfig(cfg)
 
-	http.HandleFunc("/users", apiWrap([]string{"GET"}, usersHandler))
-	http.HandleFunc("/user/", apiWrap([]string{"GET", "PUT", "DELETE"}, userHandler))
-	http.HandleFunc("/certs", apiWrap([]string{"GET"}, certsHandler))
-	http.HandleFunc("/certs/", apiWrap([]string{"GET", "POST"}, certsHandler))
-	http.HandleFunc("/cert/", apiWrap([]string{"GET", "DELETE"}, certHandler))
-	http.HandleFunc("/events", apiWrap([]string{"GET", "DELETE"}, eventsHandler))
+	http.HandleFunc("/users", httputil.APIWrap([]string{"GET"}, usersHandler))
+	http.HandleFunc("/user/", httputil.APIWrap([]string{"GET", "PUT", "DELETE"}, userHandler))
+	http.HandleFunc("/certs", httputil.APIWrap([]string{"GET"}, certsHandler))
+	http.HandleFunc("/certs/", httputil.APIWrap([]string{"GET", "POST"}, certsHandler))
+	http.HandleFunc("/cert/", httputil.APIWrap([]string{"GET", "DELETE"}, certHandler))
+	http.HandleFunc("/events", httputil.APIWrap([]string{"GET", "DELETE"}, eventsHandler))
+	http.HandleFunc("/settings", httputil.APIWrap([]string{"GET", "PUT"}, settingsHandler))
+	http.HandleFunc("/whitelist", httputil.APIWrap([]string{"GET"}, whitelistHandler))
+	http.HandleFunc("/whitelist/", httputil.APIWrap([]string{"DELETE", "PUT"}, whitelistHandler))
 
-	http.HandleFunc("/", apiWrap([]string{"GET"}, func(writer http.ResponseWriter, req *http.Request) {
+	http.HandleFunc("/", httputil.APIWrap([]string{"GET"}, func(writer http.ResponseWriter, req *http.Request) {
 		// serve a 404 to all other requests; note that "/" is effectively a wildcard
 		log.Warn("server", "incoming unknown request to '"+req.URL.Path+"'")
 		httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
@@ -322,8 +343,9 @@ func userHandler(writer http.ResponseWriter, req *http.Request) {
 			Email, TOTPURL string
 		}
 
+		settings := loadSettings()
 		key, err := totp.Generate(totp.GenerateOpts{
-			Issuer:      cfg.ServiceName,
+			Issuer:      settings.ServiceName,
 			AccountName: chunks[2],
 		})
 		if err != nil {
@@ -553,9 +575,11 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 			panic(err)
 		}
 
+		s := loadSettings()
+
 		// generate a signed cert & private key (never written to disk)
 		var kp *ca.Keypair
-		if kp, err = authority.CreateClientKeypair(cfg.IssuedCertDuration, cfg.ServiceName, email, serial, 4096); err != nil {
+		if kp, err = authority.CreateClientKeypair(s.IssuedCertDuration, s.ServiceName, email, serial, 4096); err != nil {
 			panic(err)
 		}
 
@@ -583,8 +607,8 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		}
 
 		// save a record of the cert to the database
-		q = fmt.Sprintf("insert into certs (email, fingerprint, desc, expires) values (?, ?, ?, date('now','+%d day'))", cfg.IssuedCertDuration)
-		log.Debug(TAG, "q", q, cfg.IssuedCertDuration)
+		q = fmt.Sprintf("insert into certs (email, fingerprint, desc, expires) values (?, ?, ?, date('now','+%d day'))", s.IssuedCertDuration)
+		log.Debug(TAG, "q", q, s.IssuedCertDuration)
 		writeDatabaseByQuery(q, email, fp, reqBody.Description)
 
 		// record the event
@@ -727,5 +751,100 @@ func eventsHandler(writer http.ResponseWriter, req *http.Request) {
 		log.Status(TAG, "clearing event log")
 		writeDatabaseByQuery("delete from events")
 		writeDatabaseByQuery("insert into events (event, email, value) values (?, ?, ?)", "events log reset", "", fmt.Sprintf("%d events cleared", len(events)))
+	}
+}
+
+func settingsHandler(writer http.ResponseWriter, req *http.Request) {
+	// GET /settings -- fetch service metadata
+	//   I: None
+	//   O: {ServiceName: "", ClientLimit: 2, IssuedCertDuration: 90, WhitelistedDomains:[""]}
+	//   200: the object above
+	// PUT /settings -- update service metadata
+	//   I: {ServiceName: "", ClientLimit: 2, IssuedCertDuration: 90, WhitelistedDomains:[""]}
+	//   O: {ServiceName: "", ClientLimit: 2, IssuedCertDuration: 90, WhitelistedDomains:[""]}
+	//   200: the object above + values stored; 400 (bad request): missing or malformed values, or empty body
+	// Non-GET/DELETE: 409 (bad method)
+
+	TAG := "/settings"
+	switch req.Method {
+	case "GET":
+		httputil.SendJSON(writer, http.StatusOK, loadSettings())
+	case "PUT":
+		s := settings{}
+		if err := httputil.PopulateFromBody(&s, req); err != nil {
+			log.Error(TAG, "error parsing request body", req.Method)
+			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+		}
+		storeSettings(&s)
+		httputil.SendJSON(writer, http.StatusOK, loadSettings())
+		log.Status(TAG, "completed PUT")
+	default:
+		log.Error(TAG, "API wrapper sentinel error", req.Method)
+		httputil.SendJSON(writer, http.StatusInternalServerError, struct{}{})
+	}
+}
+
+func whitelistHandler(writer http.ResponseWriter, req *http.Request) {
+	// GET /whitelist -- fetch list of whitelisted users
+	//   I: None
+	//   O: {Users: [""]}
+	//   200: the object above
+	// PUT /whitelist/<email> -- add a user to the whitelist
+	//   I: None
+	//   O: {Users: [""]}
+	//   200: new complete list of users; 400: malformed or missing email
+	//   Idempotent if user is already whitelisted.
+	// DELETE /whitelist/<email> -- delete a user to the whitelist
+	//   I: None
+	//   O: {Users: [""]}
+	//   200: new complete list of users; 404: user not whitelisted; 400: malformed or missing email
+	// Non-GET/DELETE: 409 (bad method)
+	// Returned list of users is sorted.
+
+	TAG := "/whitelist"
+
+	var email string
+	chunks := strings.Split(req.URL.Path, "/")
+	if len(chunks) > 2 {
+		email = chunks[2]
+	}
+
+	switch req.Method {
+	case "GET":
+		if email != "" {
+			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+			return
+		}
+		q := "select email from whitelist order by email"
+		cxn := getDB()
+		defer cxn.Close()
+		emails := []string{}
+		if rows, err := cxn.Query(q); err != nil {
+			panic(err)
+		} else {
+			defer rows.Close()
+			for rows.Next() {
+				rows.Scan(&email)
+				emails = append(emails, email)
+			}
+		}
+		httputil.SendJSON(writer, http.StatusOK, struct{ Users []string }{emails})
+	case "PUT":
+		if email == "" {
+			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+			return
+		}
+		writeDatabaseByQuery("insert or replace into whitelist (email) values (?)", email)
+		httputil.SendJSON(writer, http.StatusOK, struct{ Users []string }{loadSettings().WhitelistedUsers})
+	case "DELETE":
+		if email == "" {
+			httputil.SendJSON(writer, http.StatusBadRequest, struct{}{})
+			return
+		}
+		writeDatabaseByQuery("delete from whitelist where email=?", email)
+		httputil.SendJSON(writer, http.StatusOK, struct{ Users []string }{loadSettings().WhitelistedUsers})
+	default:
+		log.Error(TAG, "API wrapper sentinel error", req.Method)
+		httputil.SendJSON(writer, http.StatusInternalServerError, struct{}{})
 	}
 }

@@ -111,6 +111,7 @@ const userWhitelist = Vue.component('user-whitelist', {
     "remove": function(email) {
       axios.delete("/api/whitelist/" + email).then((res) => {
         if (res.data.Artifact != null) {
+          console.log(res.data);
           this.users = res.data.Artifact.Users;
         } else {
           //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
@@ -123,6 +124,7 @@ const userWhitelist = Vue.component('user-whitelist', {
     "addUser": function() {
       axios.put("/api/whitelist/" + this.whitelistAdd).then((res) => {
         if (res.data.Artifact != null) {
+          console.log(res.data);
           this.users = res.data.Artifact.Users;
         } else {
           //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
@@ -131,6 +133,7 @@ const userWhitelist = Vue.component('user-whitelist', {
         //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
         console.log(err);
       });
+      this.whitelistAdd = "";
     },
   },
   mounted: function() {
@@ -155,7 +158,7 @@ const settings = Vue.component('settings', {
       if (res.data.Artifact != null) {
         this.serviceName = res.data.Artifact.ServiceName;
         this.clientLimit = res.data.Artifact.ClientLimit;
-        this.clientCertDuration = res.data.Artifact.ClientCertDuration;
+        this.clientCertDuration = res.data.Artifact.IssuedCertDuration;
         this.whitelistedDomains = res.data.Artifact.WhitelistedDomains;
       } else {
         //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
@@ -178,14 +181,26 @@ const settings = Vue.component('settings', {
       this.$router.push(globals.DefaultPath);
     },
     "submit": function() {
+      let whitelistedDomains = str(""+this.whitelistedDomains).split(" ").filter(w => w != "");
       let payload = {
         "ServiceName": this.serviceName,
-        "ClientLimit": this.clientLimit,
-        "ClientCertDuration": this.clientCertDuration,
-        "WhitelistedDomains": this.whitelistedDomains,
+        "ClientLimit": parseInt(this.clientLimit),
+        "IssuedCertDuration": parseInt(this.clientCertDuration),
+        "WhitelistedDomains": whitelistedDomains,
       };
+      if (payload.ClientLimit == NaN) {
+        // TODO
+        return;
+      }
+      if (payload.IssuedCertDuration == NaN) {
+        // TODO
+        return;
+      }
+      console.log(payload);
       axios.put("/api/config", json=payload).then((res) => {
-        document.location.reload();
+        //TODO document.location.reload();
+        this.$router.push(globals.DefaultPath);
+        console.log("done");
       }).catch((err) => {
         //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
         console.log(err);

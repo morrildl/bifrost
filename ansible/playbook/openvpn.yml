@@ -90,4 +90,12 @@
           CREATE INDEX events_email_idx on events (email);
           CREATE INDEX events_value_idx on events (value);
           CREATE INDEX events_ts_idx on events (ts);
+
+          CREATE TABLE settings (rowid integer primary key, key text not null unique, value text not null, modified timestamp not null default current_timestamp);
+          CREATE INDEX settings_key_idx on settings (key);
+          CREATE INDEX settings_mod_idx on settings (modified);
+
+          CREATE TABLE whitelist (rowid integer primary key, email text not null unique, modified timestamp not null default current_timestamp);
+          CREATE INDEX whitelist_email_idx on settings (key);
+          CREATE INDEX whitelist_mod_idx on settings (modified);
         creates: /opt/openvpn/db.sqlite3
