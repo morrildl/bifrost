@@ -18,12 +18,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.17.1/axios.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.16/vue.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vue-router/3.0.1/vue-router.js" defer></script>
-<script src="/static/bifrost.js" defer></script>
 
 <!-- minified CDN scripts, for production -->
 <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.17.1/axios.min.js" defer></script> -->
 <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/vue/2.5.3/vue.min.js" defer></script> -->
 <!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/vue-router/3.0.1/vue-router.min.js" defer></script> -->
+
+<script src="/static/bifrost.js" defer></script>
 
 <title></title>
 </style></head><body>
@@ -32,24 +33,27 @@
 <div style="display: none;">
 
   <!-- overlay indicating action in progress -->
-  <div class="modal is-active" id="waiting_modal" v-if="waiting">
-    <div class="modal-background"></div>
-    <!-- bulma's built-in modal-content class doesn't work b/c it is fixed width so doesn't play
-        nicely if you want a bubble smaller than that, so fake it -->
-    <div class="has-centered-text box" style="z-index: 99; font-size: 150%;">
-      {{ message }}
+  <div id="waiting-modal">
+    <div class="modal" :class="{'is-active': waiting}">
+      <div class="modal-background"></div>
+      <div class="modal-content">
+          <div class="box">{{ displayMessage }}</div>
+      </div>
     </div>
   </div>
   <!-- end overlay indicating action in progress -->
 
   <!-- overlay indicating an error occurred -->
-  <div class="modal is-active" id="error_modal" v-if="active">
-    <div class="modal-background"></div>
-    <div class="box" style="z-index: 99; font-size: 150%;">
-      <!-- TODO: this is a more complicated layout so we can probably use a normal Bulma layout here -->
-      {{message}}<br/>
-      <pre style="font-family: sans-serif;" v-if="extra">{{extra}}</pre><br/>
-      <button v-if="recoverable" v-on:click="clear()" class="button is-primary">Dismiss</button>
+  <div id="error-modal">
+    <div class="modal" :class="{'is-active': visible}">
+      <div class="modal-background"></div>
+      <div class="modal-content">
+        <div class="notification" :class="{'is-danger': !error.Recoverable, 'is-info': error.Recoverable}">
+          <section class="content">{{ error.Message }}</section>
+          <section class="content" v-if="visible">{{ error.Extra }}</section>
+          <button v-if="error.Recoverable" @click="clear()" class="button is-primary">Dismiss</button>
+        </div>
+      </div>
     </div>
   </div>
   <!-- end overlay indicating action in progress -->
@@ -57,6 +61,8 @@
   <!-- navbar with admin-only Users/Settings entries -->
   <div id="navbar">
     <nav class="navbar" role="navigation">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="navbar-brand" style="text-transform: uppercase; font-size: 125%;">
         <router-link class="navbar-item" :to="globals.DefaultPath"><img class="logo" src="/static/logo.png" style="padding-right: 1em;"/>{{globals.ServiceName}}</router-link>
       </div>
@@ -67,8 +73,25 @@
             <router-link tag="li" v-if="globals.IsAdmin" class="is-tab" :class="{'is-active': $route.path.startsWith('/users')}" to="/users"><a>All Users</a></router-link>
             <router-link tag="li" v-if="globals.IsAllowed" class="is-tab" :class="{'is-active': $route.path.startsWith('/devices')}" to="/devices"><a>My Devices</a></router-link>
             <router-link tag="li" v-if="globals.IsAllowed" class="is-tab" :class="{'is-active': $route.path == '/password'}" to="/password"><a>My Password</a></router-link>
+            <router-link tag="li" v-if="globals.IsAdmin" class="is-tab" :class="{'is-active': $route.path == '/events'}" to="/events"><a>Event Log</a></router-link>
             <router-link tag="li" v-if="globals.IsAdmin" class="is-tab" :class="{'is-active': $route.path == '/settings'}" to="/settings"><a>Settings</a></router-link>
           </div></div>
+        </div>
+      </div>
+      <div class="modal" :class="{'is-active': showIntercept}">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">You must set up a password</p>
+          </header>
+          <section class="modal-card-body">
+            <div class="content">
+              <p>To use {{ globals.ServiceName }} you must first set up a two-factor password, and then configure client devices.</p>
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button is-success" @click="toTOTP()">Let's Do This</button>
+          </footer>
         </div>
       </div>
     </nav>
@@ -78,6 +101,8 @@
   <!-- normal user view of their client certs -->
   <div id="devices">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
         <h1>Devices</h1>
         <table class="table is-hoverable is-striped is-narrow is-fullwidth">
@@ -143,6 +168,8 @@
   <!-- normal user view to generate a new cert -->
   <div id="new-device">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
         <h1>Add a device</h1>
         <div class="content">
@@ -203,6 +230,8 @@
   <!-- admin form to edit system settings -->
   <div id="settings">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
         <div class="columns"><!-- non-mobile columns here, so that user list stacks below settings on phones -->
           <div class="column is-6">
@@ -217,7 +246,7 @@
             </div>
 
             <div class="field">
-              <div class="label">Maximum certificates per user</div>
+              <div class="label">Maximum devices per user</div>
               <div class="control has-icons-left">
                 <input class="input" type="text" placeholder="2" v-model="clientLimit"></input>
                 <span class="icon is-small is-left"><i class="fa fa-clone"></i></span>
@@ -265,6 +294,8 @@ sententio.us"></textarea>
   <!-- user whitelist display/edit; usually a sub-component of settings -->
   <div id="user-whitelist">
     <div>
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <h1>User Access Whitelist</h1>
       <div class="help">These users have access even if their account is not in an approved domain.</div>
       <table class="table is-hoverable is-fullwidth is-striped">
@@ -297,6 +328,8 @@ sententio.us"></textarea>
   <!-- admin UI showing a list of all users -->
   <div id="users">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
         <h1>Current Users &amp; Devices</h1>
         <table class="table is-hoverable is-striped is-fullwidth is-narrow">
@@ -331,6 +364,8 @@ sententio.us"></textarea>
   <!-- unauthorized: displayed when the current user is not allowed to access the VPN -->
   <div id="sorry">
     <div class="columns"><div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <h1>Not Allowed</h1>
       <p>Sorry! The administrator for {{ globals.ServiceName }} has not granted you access to this
       service.</p>
@@ -342,6 +377,8 @@ sententio.us"></textarea>
   <!-- admin view of user details -->
   <div id="user-details">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="modal" :class="{ 'is-active': showDeleteConfirm }">
         <div class="modal-background"></div>
         <div class="modal-card">
@@ -429,8 +466,11 @@ sententio.us"></textarea>
   <!-- normal user view to generate TOTP seed -->
   <div id="totp">
     <div class="columns">
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
       <div class="column is-8-desktop is-offset-2-desktop is-10-mobile is-offset-1-mobile is-8-tablet is-offset-2-tablet">
-        <h1>Set your password</h1>
+        <h1 v-if="!configured">Set your password</h1>
+        <h1 v-if="configured">Change your password</h1>
         <div class="content">
           <div v-if="!configured">
             <p>
@@ -451,6 +491,7 @@ sententio.us"></textarea>
             </p>
           </div>
           <div v-if="configured">
+            <p><b>You have already set up a password.</b></p>
             <p>
               If you've lost, reset, or switched your phone, you'll need to reconfigure your {{
               globals.ServiceName }} password. To do so, simply click the button below and scan
@@ -467,7 +508,8 @@ sententio.us"></textarea>
           </div>
           <div class="field">
             <div class="control">
-              <button class="button is-info" @click="reset()">Set Password</button>
+              <button v-if="!configured" class="button is-info" @click="reset()">Set Password</button>
+              <button v-if="configured" class="button is-info" @click="reset()">Change Password</button>
             </div>
           </div>
         </div>
@@ -495,6 +537,41 @@ sententio.us"></textarea>
     </div>
   </div>
   <!-- end normal user view to generate TOTP seed -->
+
+  <!-- admin view of system events -->
+  <div id="events">
+    <div>
+      <waiting-modal :waiting="xhrPending"></waiting-modal>
+      <error-modal :error="error" :clear="clearError"></error-modal>
+      <table class="table is-fullwidth is-narrow">
+        <tr>
+          <td><a class="link-h1" @click="reset()">Event Log</a></td>
+          <td class="has-text-right"><a v-if="events.length == 25" @click="more()" class="button is-info is-outlined">More</a>
+          <a class="button is-info is-outlined" href="/api/events?before=all" download="events.json">Export</a></td>
+        </tr>
+      </table>
+      <table class="table is-hoverable is-striped is-narrow is-fullwidth is-size-7">
+        <thead>
+          <tr>
+            <th>Action</th>
+            <th>User</th>
+            <th></th>
+            <th class="has-text-right"><abbr title="Time when the event occurred">When</abbr></th>
+          </tr>
+        </thead>
+        <tr v-for="event in events">
+          <td>{{ event.Event }}</td>
+          <td>{{ event.Email }}</td>
+          <td>{{ event.Value }}</td>
+          <td class="has-text-right">{{ event.Timestamp }}</td>
+        </tr>
+      </table>
+      <div class="content" v-if="events.length == 0">
+        <i>The system has not recorded any events so far.</i>
+      </div>
+    </div>
+  </div>
+  <!-- end admin view of system events -->
 
 </div><!-- end templates definition (i.e. end 'display: none;' block) -->
 

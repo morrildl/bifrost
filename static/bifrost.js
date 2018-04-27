@@ -20,51 +20,7 @@ const globals = {
   DefaultPath: "",
 };
 
-Vue.component('waiting', {
-  template: "#waiting_modal",
-  data: function() {
-    return {
-      busy: false,
-      message: "",
-    };
-  },
-  methods: {
-    set: function(msg) {
-      this.message = str(msg);
-      this.message = this.message != "" ? this.message : "A moment please...";
-      this.busy = true;
-    },
-    clear: function() {
-      this.busy = false;
-    }
-  }
-});
-
-Vue.component('error', {
-  template: "#error_modal",
-  data: function() {
-    return {
-      "message": "",
-      "extra": "",
-      "recoverable": false,
-    }
-  },
-  computed: {
-    active: function() { return str(this.message) != "" ? true : false; }
-  },
-  methods: {
-    set: function(message, recoverable, extra) {
-      this.message = str(message);
-      this.extra = str(extra);
-      this.recoverable = recoverable ? true : false;
-    },
-    clear: function() {
-      this.message = "";
-      this.extra = "";
-      this.recoverable = false;
-    }
-  }
-});
+const generalError = { Message: "An error occurred in this app.", Extra: "Please reload this page.", Recoverable: false };
 
 const sorry = Vue.component('sorry', {
   template: "#sorry",
@@ -76,24 +32,29 @@ const users = Vue.component('users', {
   props: [ "globals" ],
   data: function() {
     return {
-      "users": [],
+      users: [],
+      xhrPending: false,
+      error: { },
     };
   },
   methods: {
-    "details": function(email) {
+    clearError: function() { this.error = { }; },
+    details: function(email) {
       this.$router.push("/users/" + email);
     },
   },
   mounted: function() {
+    this.xhrPending = true;
     axios.get("/api/users").then((res) => {
-      if (res.data.Artifact != null) {
+      this.xhrPending = false;
+      if (res.data.Artifact) {
         this.users = res.data.Artifact.Users;
       } else {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        this.error = res.data.Error ? res.data.Error : generalError;
       }
     }).catch((err) => {
-      //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      console.log(err);
+      this.xhrPending = false;
+      this.error = err.response.data.Error ? err.response.data.Error : generalError;
     });
   },
 });
@@ -103,49 +64,47 @@ const userWhitelist = Vue.component('user-whitelist', {
   props: ["globals"],
   data: function() {
     return {
-      "users": [],
-      "whitelistAdd": "",
+      users: [],
+      whitelistAdd: "",
+      xhrPending: false,
+      error: { },
     };
   },
   methods: {
-    "remove": function(email) {
+    clearError: function() { this.error = { }; },
+    remove: function(email) {
       axios.delete("/api/whitelist/" + email).then((res) => {
-        if (res.data.Artifact != null) {
-          console.log(res.data);
+        if (res.data.Artifact) {
           this.users = res.data.Artifact.Users;
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });
     },
-    "addUser": function() {
+    addUser: function() {
       axios.put("/api/whitelist/" + this.whitelistAdd).then((res) => {
-        if (res.data.Artifact != null) {
-          console.log(res.data);
+        if (res.data.Artifact) {
           this.users = res.data.Artifact.Users;
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });
       this.whitelistAdd = "";
     },
   },
   mounted: function() {
     axios.get("/api/whitelist").then((res) => {
-      if (res.data.Artifact != null) {
+      if (res.data.Artifact) {
         this.users = res.data.Artifact.Users;
       } else {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        this.error = res.data.Error ? res.data.Error : generalError;
       }
     }).catch((err) => {
-      //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      console.log(err);
+      this.error = err.response.data.Error ? err.response.data.Error : generalError;
     });
   },
 });
@@ -155,56 +114,54 @@ const settings = Vue.component('settings', {
   props: [ "globals" ],
   mounted: function() {
     axios.get("/api/config").then((res) => {
-      if (res.data.Artifact != null) {
+      if (res.data.Artifact) {
         this.serviceName = res.data.Artifact.ServiceName;
         this.clientLimit = res.data.Artifact.ClientLimit;
         this.clientCertDuration = res.data.Artifact.IssuedCertDuration;
         this.whitelistedDomains = res.data.Artifact.WhitelistedDomains;
       } else {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        this.error = res.data.Error ? res.data.Error : generalError;
       }
     }).catch((err) => {
-      //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      console.log(err);
+      this.error = err.response.data.Error ? err.response.data.Error : generalError;
     });
   },
   data: function() {
     return {
-      "serviceName": "",
-      "clientLimit": "",
-      "clientCertDuration": "",
-      "whitelistedDomains": ""
+      serviceName: "",
+      clientLimit: "",
+      clientCertDuration: "",
+      whitelistedDomains: "",
+      xhrPending: false,
+      error: { },
     };
   },
   methods: {
-    "cancel": function() {
+    clearError: function() { this.error = { }; },
+    cancel: function() {
       this.$router.push(globals.DefaultPath);
     },
-    "submit": function() {
+    submit: function() {
       let whitelistedDomains = str(""+this.whitelistedDomains).split(" ").filter(w => w != "");
       let payload = {
-        "ServiceName": this.serviceName,
-        "ClientLimit": parseInt(this.clientLimit),
-        "IssuedCertDuration": parseInt(this.clientCertDuration),
-        "WhitelistedDomains": whitelistedDomains,
+        ServiceName: this.serviceName,
+        ClientLimit: parseInt(this.clientLimit),
+        IssuedCertDuration: parseInt(this.clientCertDuration),
+        WhitelistedDomains: whitelistedDomains,
       };
       if (payload.ClientLimit == NaN) {
-        // TODO
+        this.error = {Message: "Max clients must be a number.", Extra: "", Recoverable: true};
         return;
       }
       if (payload.IssuedCertDuration == NaN) {
-        // TODO
+        this.error = {Message: "Refresh period must be a number.", Extra: "", Recoverable: true};
         return;
       }
-      console.log(payload);
       axios.put("/api/config", json=payload).then((res) => {
-        //TODO document.location.reload();
         this.$router.push(globals.DefaultPath);
-        console.log("done");
+        document.location.reload();
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
-        this.$router.push(globals.DefaultPath);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });
     },
   },
@@ -215,13 +172,16 @@ const devices = Vue.component('devices', {
   props: [ "globals" ],
   data: function() {
     return {
-      "certs": [],
-      "victim": "",
-      "victimDesc": "",
+      certs: [],
+      victim: "",
+      victimDesc: "",
+      xhrPending: "",
+      error: { },
     };
   },
   methods: {
-    "revoke": function(fingerprint) {
+    clearError: function() { this.error = { }; },
+    revoke: function(fingerprint) {
       this.victimDesc = "";
       for (let c of this.certs) {
         if (c.Fingerprint == fingerprint) {
@@ -232,39 +192,39 @@ const devices = Vue.component('devices', {
       if (this.victimDesc != "") {
         this.victim = fingerprint;
       } else {
-        console.log("error, could not find revocation victim");
+        this.error = {Message: "There was a problem locating that certificate.", Extra: "Try reloading this page.", Recoverable: true};
       }
     },
-    "clearRevoke": function() {
+    clearRevoke: function() {
       this.victim = "";
       this.victimDesc = "";
     },
-    "doRevoke": function(fingerprint) {
+    doRevoke: function(fingerprint) {
+      this.xhrPending = true;
       axios.delete("/api/certs/" + fingerprint).then((res) => {
-        if (res.data.Artifact != null) {
-          this.clearRevoke();
-          this.loadCerts();
-        } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        }
+        this.xhrPending = false;
+        this.clearRevoke();
+        this.loadCerts();
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.xhrPending = false;
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
-    "addDevice": function() {
+    addDevice: function() {
       this.$router.push("/newdevice");
     },
-    "loadCerts": function() {
+    loadCerts: function() {
+      this.xhrPending = true;
       axios.get("/api/certs").then((res) => {
-        if (res.data.Artifact != null) {
+        this.xhrPending = false;
+        if (res.data.Artifact) {
           this.certs = res.data.Artifact.Certs;
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.xhrPending = false;
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
   },
@@ -278,32 +238,39 @@ const newDevice = Vue.component('new-device', {
   props: [ "globals" ],
   data: function() {
     return {
-      "desc": "",
-      "pendingServer": false,
-      "ovpn": "",
+      desc: "",
+      pendingServer: false,
+      ovpn: "",
+      xhrPending: false,
+      error: { },
     };
   },
   computed: {
-    "filename": function() {
+    filename: function() {
       return this.desc + ".ovpn";
     },
   },
   methods: {
-    "generateCert": function() {
+    clearError: function() { this.error = { }; },
+    generateCert: function() {
+      if (str(this.desc) == "") {
+        this.error = { Message: "You must enter a description.", Extra: "", Recoverable: true};
+        return;
+      }
       let payload = { "Description": this.desc };
       this.pendingServer = true;
       axios.post("/api/certs", json=payload).then((res) => {
-        if (res.data.Artifact != null) {
+        if (res.data.Artifact) {
           this.ovpn = res.data.Artifact.OVPNDataURL;
+        } else {
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
-        // TODO: error
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
         this.$router.push(globals.DefaultPath);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });
     },
-    "done": function() {
+    done: function() {
       this.pendingServer = false;
       this.ovpn = "";
       this.desc = "";
@@ -317,33 +284,35 @@ const userDetails = Vue.component('user-details', {
   props: [ "globals", "email" ],
   data: function() {
     return {
-      "activeCerts": [],
-      "showDeleteConfirm": false,
-      "showRevokeConfirm": false,
-      "revocationVictim": "",
-      "revocationVictimDesc": "",
+      activeCerts: [],
+      showDeleteConfirm: false,
+      showRevokeConfirm: false,
+      revocationVictim: "",
+      revocationVictimDesc: "",
+      xhrPending: false,
+      error: { },
     };
   },
   methods: {
-    "deleteUser": function() {
+    clearError: function() { this.error = { }; },
+    deleteUser: function() {
       this.showDeleteConfirm = true;
     },
-    "cancelDeleteUser": function() {
+    cancelDeleteUser: function() {
       this.showDeleteConfirm = false;
     },
-    "doDeleteUser": function() {
+    doDeleteUser: function() {
       axios.delete("/api/users/" + this.email).then((res) => {
-        if (res.data.Artifact != null) {
+        if (res.data.Artifact) {
           this.$router.replace(this.globals.DefaultPath);
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
-    "revoke": function(fingerprint) {
+    revoke: function(fingerprint) {
       this.revocationVictimDesc = "";
       for (let c of this.activeCerts) {
         if (c.Fingerprint == fingerprint) {
@@ -354,39 +323,37 @@ const userDetails = Vue.component('user-details', {
       if (this.revocationVictimDesc != "") {
         this.revocationVictim = fingerprint;
       } else {
-        console.log("error, could not find revocation victim");
+        this.error = {Message: "There was a problem locating that certificate.", Extra: "Try reloading this page.", Recoverable: true};
       }
 
       this.showRevokeConfirm = true;
     },
-    "clearRevoke": function() {
+    clearRevoke: function() {
       this.revocationVictim = "";
       this.revocationVictimDesc = "";
       this.showRevokeConfirm = false;
     },
-    "doRevoke": function() {
+    doRevoke: function() {
       axios.delete("/api/certs/" + this.revocationVictim).then((res) => {
-        if (res.data.Artifact != null) {
+        if (res.data.Artifact) {
           this.clearRevoke();
           this.loadUserCerts();
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
-    "loadUserCerts": function() {
+    loadUserCerts: function() {
       axios.get("/api/users/" + this.email).then((res) => {
-        if (res.data.Artifact != null) {
+        if (res.data.Artifact) {
           this.activeCerts = res.data.Artifact.ActiveCerts;
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
   },
@@ -400,41 +367,180 @@ const totp = Vue.component('password', {
   props: [ "globals" ],
   data: function() {
     return {
-      "configured": false,
-      "pendingServer": false,
-      "imgURL": "",
+      configured: false,
+      pendingServer: false,
+      imgURL: "",
+      xhrPending: false,
+      error: { },
     };
   },
   mounted: function() {
-     axios.get("/api/totp").then((res) => {
-      if (res.data.Artifact != null) {
+    axios.get("/api/totp").then((res) => {
+      if (res.data.Artifact) {
         this.configured = res.data.Artifact.Configured;
       } else {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+        this.error = res.data.Error ? res.data.Error : generalError;
       }
     }).catch((err) => {
-      //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      console.log(err);
+      this.error = err.response.data.Error ? err.response.data.Error : generalError;
     });   
   },
   methods: {
-    "reset": function() {
+    clearError: function() { this.error = { }; },
+    reset: function() {
       this.pendingServer = true;
       axios.post("/api/totp").then((res) => {
-        if (res.data.Artifact != null) {
+        if (res.data.Artifact) {
           this.imgURL = res.data.Artifact.ImageURL;
         } else {
-          //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
+          this.error = res.data.Error ? res.data.Error : generalError;
         }
       }).catch((err) => {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-        console.log(err);
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
       });   
     },
-    "done": function() {
+    done: function() {
       this.pendingServer = false;
       this.imgURL = "";
       this.configured = true;
+    },
+  },
+});
+
+const events = Vue.component('password', {
+  template: "#events",
+  props: [ "globals" ],
+  data: function() {
+    return {
+      events: [],
+      refreshTimer: null,
+      before: "",
+      xhrPending: false,
+      error: { },
+    };
+  },
+  methods: {
+    clearError: function() { this.error = { }; },
+    loadEvents: function() {
+      let url = "/api/events";
+      if (this.before != "") {
+        url = url + "?before=" + this.before;
+      }
+      axios.get(url).then((res) => {
+        if (res.data.Artifact) {
+          this.events = res.data.Artifact.Events;
+        } else {
+          this.error = res.data.Error ? res.data.Error : generalError;
+        }
+      }).catch((err) => {
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
+      });   
+    },
+    more: function() {
+      if (this.events.length > 0) {
+        this.stopRefresh();
+        this.before = this.events[this.events.length - 1].Timestamp;
+        this.startRefresh();
+      }
+    },
+    reset: function() {
+        this.stopRefresh();
+        this.before = "";
+        this.startRefresh();
+    },
+    startRefresh: function() {
+      this.loadEvents();
+      this.refreshTimer = setInterval(() => { this.loadEvents(); }, 15000);
+    },
+    stopRefresh: function() {
+      if (this.refreshTimer != null) {
+        clearInterval(this.refreshTimer);
+        this.refreshTimer = null;
+      }
+    },
+    export: function() {
+      axios.get("/api/events?before=all").then((res) => {
+        if (res.data.Artifact) {
+          this.events = res.data.Artifact.Events;
+        } else {
+          this.error = res.data.Error ? res.data.Error : generalError;
+        }
+      }).catch((err) => {
+        this.error = err.response.data.Error ? err.response.data.Error : generalError;
+      });   
+    },
+  },
+  mounted: function() {
+    this.startRefresh();
+  },
+  beforeDestroy: function() {
+    this.stopRefresh();
+  },
+});
+
+Vue.component('navbar', {
+  template: "#navbar",
+  data: function() {
+    return {
+      selected: "",
+      globals: globals,
+      showIntercept: false,
+      xhrPending: false,
+      error: { },
+    };
+  },
+  mounted: function() {
+    axios.get("/api/init").then((res) => {
+      if (res.data.Artifact) {
+        globals.ServiceName = str(res.data.Artifact.ServiceName);
+        globals.IsAdmin = res.data.Artifact.IsAdmin;
+        globals.MaxClients = res.data.Artifact.MaxClients;
+        globals.DefaultPath = str(res.data.Artifact.DefaultPath);
+        globals.IsAllowed = globals.DefaultPath != "/sorry";
+
+        if (str(this.$router.path) == "/" || str(this.$router.path) == "") {
+          this.$router.replace(globals.DefaultPath);
+        }
+        document.title = globals.ServiceName;
+        axios.get("/api/totp").then((res) => {
+          if ((res.data.Artifact) && !res.data.Artifact.Configured) {
+            this.showIntercept = true;
+          }
+        }).catch((err) => {
+          this.error = err.response.data.Error ? err.response.data.Error : generalError;
+        });   
+      } else {
+        this.error = res.data.Error ? res.data.Error : generalError;
+      }
+    }).catch((err) => {
+      this.error = err.response.data.Error ? err.response.data.Error : generalError;
+    });
+  },
+  methods: {
+    clearError: function() { this.error = { }; },
+    toTOTP: function() {
+      this.$router.replace("/password");
+      this.showIntercept = false;
+    },
+  },
+});
+
+Vue.component('waiting-modal', {
+  template: "#waiting-modal",
+  props: [ "message", "waiting" ],
+  computed: {
+    displayMessage: function() {
+      return str(this.message) != "" ? str(this.message) : "A moment please...";
+    },
+  },
+});
+
+Vue.component('error-modal', {
+  template: "#error-modal",
+  props: [ "error", "clear" ],
+  computed: {
+    visible: function() {
+      return str(this.error.Message) != "";
     },
   },
 });
@@ -450,38 +556,8 @@ const router = new VueRouter({
     { path: "/devices", component: devices, props: {globals: globals} },
     { path: "/newdevice", component: newDevice, props: {globals: globals} },
     { path: "/password", component: totp, props: {globals: globals} },
-  ]
-});
-
-Vue.component('navbar', {
-  template: "#navbar",
-  data: function() {
-    return {
-      selected: "",
-      globals: globals,
-    };
-  },
-  mounted: function() {
-    axios.get("/api/init").then((res) => {
-      if (res.data.Artifact != null) {
-        globals.ServiceName = str(res.data.Artifact.ServiceName);
-        globals.IsAdmin = res.data.Artifact.IsAdmin;
-        globals.MaxClients = res.data.Artifact.MaxClients;
-        globals.DefaultPath = str(res.data.Artifact.DefaultPath);
-        globals.IsAllowed = globals.DefaultPath != "/sorry";
-
-        if (str(this.$router.path) == "/" || str(this.$router.path) == "") {
-          this.$router.replace(globals.DefaultPath);
-        }
-        document.title = globals.ServiceName;
-      } else {
-        //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      }
-    }).catch((err) => {
-      //TODO error.set("There was an error communicating with the server.", false, "Please try again later.")
-      console.log(err);
-    });
-  },
+    { path: "/events", component: events, props: {globals: globals} },
+  ],
 });
 
 new Vue({el: "#bifrost-root", router: router});
