@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/base64"
 	"fmt"
@@ -512,7 +513,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 					}
 				}
 				if res.Created == "" { // database can't not have this, so must mean no results
-					log.Warn(TAG, "request for nonexistent user", email)
+					log.Debug(TAG, "request for nonexistent user", email)
 					httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
 					return
 				}
@@ -588,8 +589,13 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		s := loadSettings()
 
 		// generate a signed cert & private key (never written to disk)
+		subject := &pkix.Name{
+			Organization: []string{s.ServiceName},
+			CommonName:   email,
+		}
 		var kp *ca.Keypair
-		if kp, err = authority.CreateClientKeypair(s.IssuedCertDuration, s.ServiceName, email, serial, 4096); err != nil {
+		if kp, err = authority.CreateClientKeypair(s.IssuedCertDuration, subject, serial, 4096); err != nil {
+
 			panic(err)
 		}
 

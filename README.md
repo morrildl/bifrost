@@ -77,3 +77,66 @@ The `./ansible/` directory contains config files and an Ansible playbook to conf
 ## `./src/`
 
 The `./src/` directory contains the Go source code for the management REST API server.
+
+# Installation
+
+## Build binaries
+
+    GOPATH=`pwd` go build src/playground/bifrost/bifrost.go 
+    GOPATH=`pwd` go build src/playground/heimdall/heimdall.go 
+    GOPATH=`pwd` go build src/vendor/playground/ca/main/pgcert.go 
+
+    mv pgcert bifrost heimdall ansible/tmp
+
+## Generate keymatter
+    ./pgcert \
+        -bits 4096 -days 3650 -pass something \
+        -cn "Temp Authority" -org "Sententious Heavy Industries" \
+        -locality "Mountain View" -province "CA" -country "US" \
+        rootca ansible/tmp/ca.key ansible/tmp/ca.crt
+
+    ./pgcert \
+        -bits 4096 -days 365 -rootpass something -cn "ovpn.playground.global" \
+        server ansible/tmp/ca.key ansible/tmp/ca.crt
+    mv ovpn.playground.global.key ansible/tmp/server.key
+    mv ovpn.playground.global.crt ansible/tmp/server.crt
+
+    ./pgcert \
+        -bits 4096 -days 365 -rootpass something -pass something -cn "Heimdall API Client" \
+        client ansible/tmp/ca.key ansible/tmp/ca.crt
+    mv "Heimdall API Client".key ansible/tmp/client.key
+    mv "Heimdall API Client".crt ansible/tmp/client.crt
+
+    openvpn --genkey --secret ansible/tmp/tls-auth.pem
+
+    openssl dhparam -out ansible/tmp/dh-4096.pem -outform PEM 4096
+
+## Create configuration
+### Create `hosts.ini`
+
+    cp etc/ansible-hosts-example.ini ansible/tmp
+    vim ansible/tmp/hosts.ini
+
+* `vpn_public_ip` - the public IP address of your VPN server
+* `vpn_public_port` - the public port of your VPN server
+* `vpn_bind_ip` - the machine-local IP address the OpenVPN process should listen on (possibly the
+  same as `vpn_public_ip` but different if you're behind a firewall)
+* `vpn_bind_port` - the machine-local port the OpenVPN process should bind
+* `vpn_uplink_interface` - the interface name of your machine's primary uplink (e.g. `eth0`)
+* `vpn_api_port` - the port number where the API server (`heimdall`) should listen
+* `vpn_client_domain` - the domain name to push to clients (i.e. via DHCP)
+* `vpn_client_dns_servers` - the list of DNS servers to push to clients (i.e. via DHCP)
+* `vpn_client_routes` - the list of routes to push to clients (i.e. via DHCP)
+* `oauth_client_id` - the Google Cloud OAuth client ID from developer console
+* `oauth_client_secret` - the Google Cloud OAuth client secret from developer console
+* `oauth_redirect_prefix` - the prefix (i.e. scheme+host+port) of the redirect target, configured in Google Cloud console
+
+    cp etc/config-bifrost-example.json ansible/tmp/bifrost.json
+    cp etc/config-heimdall-example.json ansible/tmp/heimdall.json
+    vim ansible/tmp/*json
+
+### 
+
+## Copy configuration to server
+    cd ansible
+    ansible-playbook -i tmp/hosts.ini bifrost.yml

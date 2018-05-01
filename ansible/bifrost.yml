@@ -1,5 +1,5 @@
 ---
-- hosts: openvpn
+- hosts: bifrost 
   remote_user: root
   handlers:
     - name: run /sbin/reboot
@@ -23,58 +23,90 @@
         - python-qrcode
 
     - name: copy iptables config
-      template: src=etc/sysconfig/iptables dest=/etc/sysconfig/iptables owner=root group=root mode=u+rw,g+r,o+r
+      template: src=files/etc/sysconfig/iptables dest=/etc/sysconfig/iptables owner=root group=root mode=u+rw,g+r,o+r
 
     - name: enable iptables
       service: name=iptables state=started enabled=yes
 
     - name: enable ip_forward
-      copy: src=etc/sysctl.d/90-ip_forward.conf dest=/etc/sysctl.d/90-ip_forward.conf owner=root group=root mode=u+rw,g+r,o+r
+      copy: src=files/etc/sysctl.d/90-ip_forward.conf dest=/etc/sysctl.d/90-ip_forward.conf owner=root group=root mode=u+rw,g+r,o+r
 
     - name: copy OpenVPN config file
-      template: src=etc/openvpn/server/main.conf dest=/etc/openvpn/server/main.conf owner=root group=root mode=u+rw,g+r,o+r
+      template: src=files/etc/openvpn/server/main.conf dest=/etc/openvpn/server/main.conf owner=root group=root mode=u+rw,g+r,o+r
 
     - name: create opt directory
       file: state=directory path=/opt/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
       with_items:
-        - openvpn
-        - openvpn/bin
-        - openvpn/etc
+        - bifrost
+        - bifrost/bin
+        - bifrost/etc
+        - bifrost/sbin
+        - bifrost/var
+        - bifrost/var/log
 
     - name: create var directory
       file: state=directory path=/var/run/openvpn owner=root group=root mode=u+rwx,g-rwx,o-rwx
 
     - name: copy script files
-      copy: src=bin/{{ item }} dest=/opt/openvpn/bin/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
+      copy: src=files/bin/{{ item }} dest=/opt/bifrost/bin/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
       with_items:
         - ovpn-auth-user-pass-verify.py
         - ovpn-tls-verify.py
         - ovpn-client-logger.py
 
-    - name: copy sbin file
-      copy: src=sbin/{{ item }} dest=/usr/local/sbin/{{ item }} owner=root group=root mode=u+rwx,g+rx,o+rx
-      with_items:
-        - ovpn-admin
-
     - name: copy .ovpn template
-      template: src=opt/openvpn/etc/template.ovpn dest=/opt/openvpn/etc/template.ovpn owner=root group=root mode=u+rw,g+r,o+r
+      template: src=files/opt/bifrost/etc/template.ovpn dest=/opt/bifrost/etc/template.ovpn owner=root group=root mode=u+rw,g+r,o+r
 
     - name: copy certificate files
-      copy: src=keymatter/{{item}} dest=/opt/openvpn/etc/{{item}} owner=root group=root mode=u+rw,g-rwx,o-rwx
+      copy: src=tmp/{{item}} dest=/opt/bifrost/etc/{{item}} owner=root group=root mode=u+rw,g-rwx,o-rwx
       with_items:
         - ca.crt
-        - server.crt
-        - server.key
-        - server-pw.txt
+        - ca.key
+        - openvpn-server.crt
+        - openvpn-server.key
+        - openvpn-server-pw.txt
         - dh-4096.pem
         - tls-auth.pem
-        - client.crt
+        - heimdall-server.crt
+        - heimdall-server.key
+        - heimdall-client.crt
+        - heimdall-client.key
+        - bifrost-server.crt
+        - bifrost-server.key
+
+    - name: copy server binaries
+      copy: src=tmp/{{item}} dest=/opt/bifrost/sbin/{{item}} owner=root group=root mode=u+rwx,g+rx,o+rx
+      with_items:
+        - bifrost
+        - heimdall
+        - pgcert
+    
+    - name: copy server config files
+      template: src=../etc/config-{{item}}-example.json dest=/opt/bifrost/etc/{{item}}.json owner=root group=root mode=u+rw,g-rwx,o-rwx
+      with_items:
+        - bifrost
+        - heimdall
+    
+    - name: copy systemd service files
+      copy: src=files/etc/{{item}} dest=/lib/systemd/system/{{item}} owner=root group=root mode=u+rw,g+r,o+r
+      with_items:
+        - bifrost.service
+        - heimdall.service
+
+    - name: enable systemd services
+      service: name={{item}} state=started enabled=yes
+      with_items:
+        - bifrost
+        - heimdall
+    
+    - name: copy web app UI static files
+      copy: src=../static/ dest=/opt/bifrost/static
 
     - name: create sqlite DB
       command: /usr/bin/sqlite3
       args:
         stdin:
-          .open /opt/openvpn/db.sqlite3
+          .open /opt/bifrost/heimdall.sqlite3
 
           CREATE TABLE certs (rowid integer primary key, email text not null, fingerprint text not null unique, desc text, created timestamp not null default current_timestamp, expires timestamp not null, revoked timestamp default null);
           CREATE INDEX certs_email_idx on certs (email);
@@ -98,4 +130,4 @@
           CREATE TABLE whitelist (rowid integer primary key, email text not null unique, modified timestamp not null default current_timestamp);
           CREATE INDEX whitelist_email_idx on settings (key);
           CREATE INDEX whitelist_mod_idx on settings (modified);
-        creates: /opt/openvpn/db.sqlite3
+        creates: /opt/bifrost/heimdall.sqlite3

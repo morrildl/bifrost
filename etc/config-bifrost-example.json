@@ -1,18 +1,21 @@
 {
   "Debug": true,
-  "Port": 9000,
-  "BindAddress": "",
-  "LogFile": "",
+  "Port": 443,
+  "HTTPPort": 80,
+  "BindAddress": "{{bifrost_bind_address}}",
+  "HTTPSCertFile": "/opt/bifrost/etc/bifrost-server.crt",
+  "HTTPSKeyFile": "/opt/bifrost/etc/bifrost-server.key",
+  "LogFile": "/opt/bifrost/var/log/bifrost.log",
   "APIServerURL": "https://localhost:9090",
-  "StaticContent": "./static",
-  "AdminUsers": [ "morrildl@playground.global" ],
+  "StaticContent": "/opt/bifrost/static",
+  "AdminUsers": {{bifrost_admin_list | to_json }},
   "Session": {
     "SessionCookieID": "PlaygroundSessionID",
     "OAuth": {
       "Issuer": "accounts.google.com",
-      "ClientID": "<client ID>",
-      "ClientSecret": "<client secret>",
-      "RedirectURL": "http://localhost:9000/oauth",
+      "ClientID": "{{ oauth_client_id }}",
+      "ClientSecret": "{{ oauth_client_secret }}",
+      "RedirectURL": "{{ oauth_redirect_prefix }}/oauth",
       "RedirectPath": "/oauth",
       "Scopes": ["openid", "email"],
       "AuthURL": "https://accounts.google.com/o/oauth2/auth",
@@ -22,9 +25,9 @@
     }
   },
   "APIClient": {
-    "ClientCertFile": "./client.crt",
-    "ClientKeyFile": "./client.key",
-    "SelfSignedServerCertFile": "./server.crt",
+    "ClientCertFile": "/opt/bifrost/etc/heimdall-client.crt",
+    "ClientKeyFile": "/opt/bifrost/etc/heimdall-client.key",
+    "SelfSignedServerCertFile": "/opt/bifrost/etc/heimdall-server.crt",
     "APISecretHeader": "X-Playground-Api-Secret",
     "APISecretValue": ""
   }

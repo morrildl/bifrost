@@ -1,0 +1,24 @@
+[Unit]
+Description=Bifrost Web UI
+ConditionPathExists=/opt/bifrost
+After=network.target
+ 
+[Service]
+Type=simple
+User=root
+Group=root
+LimitNOFILE=1024
+
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+
+WorkingDirectory=/opt/bifrost
+ExecStart=/opt/bifrost/sbin/bifrost -config /opt/bifrost/etc/bifrost.json
+
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=bifrost
+ 
+[Install]
+WantedBy=multi-user.target

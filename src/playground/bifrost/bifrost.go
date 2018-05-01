@@ -3,6 +3,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -23,11 +24,14 @@ import (
 type serverConfig struct {
 	Debug         bool
 	Port          int
+	HTTPPort      int
 	BindAddress   string
 	LogFile       string
 	APIServerURL  string
 	StaticContent string
 	AdminUsers    []string
+	HTTPSCertFile string
+	HTTPSKeyFile  string
 	Session       *session.ConfigType
 	APIClient     *httputil.ConfigType
 }
@@ -35,11 +39,14 @@ type serverConfig struct {
 var cfg = &serverConfig{
 	false,
 	9000,
+	0,
 	"",
 	"./bifrost.log",
 	"https://localhost:9090/",
 	"./static",
 	[]string{},
+	"",
+	"",
 	&session.Config,
 	&httputil.Config,
 }
@@ -81,9 +88,64 @@ func main() {
 	httputil.HandleFunc("/api/totp", []string{"GET", "POST"}, totpHandler)
 	httputil.HandleFunc("/api/events", []string{"GET"}, eventsHandler)
 
-	x := fmt.Sprintf("%s:%d", "", cfg.Port)
-	log.Status("main", x)
-	log.Error("main", "shutting down; error?", http.ListenAndServe(x, nil))
+	tlsConfig := &tls.Config{
+		PreferServerCipherSuites: true,
+		CurvePreferences: []tls.CurveID{
+			tls.CurveP256,
+			tls.X25519,
+		},
+		MinVersion: tls.VersionTLS12,
+		CipherSuites: []uint16{
+			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
+			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384, // no PFS
+			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256, // no PFS
+		},
+	}
+
+	server := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		TLSConfig:    tlsConfig,
+		Handler:      http.DefaultServeMux,
+	}
+
+	if cfg.HTTPSCertFile != "" { // HTTPS mode -- not behind reverse proxy
+		// if a bare-HTTP port was also specified, start up a server on that that redirects to HTTPS with HSTS
+		if cfg.HTTPPort > 0 {
+			go func() {
+				log.Warn("main (http)", "fallback HTTP server shutting down", (&http.Server{
+					ReadTimeout:  5 * time.Second,
+					WriteTimeout: 5 * time.Second,
+					IdleTimeout:  120 * time.Second,
+					Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+						w.Header().Set("Connection", "close")
+						if !cfg.Debug {
+							w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+						}
+						port := ""
+						if cfg.Port != 443 {
+							port = fmt.Sprintf(":%d", cfg.HTTPPort)
+						}
+						url := fmt.Sprintf("https://%s%s/%s", req.Host, port, req.URL.String())
+						log.Debug("main (http)", "redirect to https", url)
+						http.Redirect(w, req, url, http.StatusMovedPermanently)
+					}),
+				}).ListenAndServe())
+			}()
+		}
+
+		// start the main HTTPS server
+		log.Error("main (https)", "shutting down", server.ListenAndServeTLS(cfg.HTTPSCertFile, cfg.HTTPSKeyFile))
+	} else { // HTTP mode -- behind reverse proxy (hopefully)
+		log.Error("main (http)", "shutting down", server.ListenAndServe())
+	}
 }
 
 /*
@@ -473,13 +535,20 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		apiRes := &struct {
 			Email, Created            string
 			ActiveCerts, RevokedCerts []*certMeta
-		}{}
+		}{"", "", []*certMeta{}, []*certMeta{}}
 
 		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "certs", ssn.Email), "GET", struct{}{}, apiRes)
 		if err != nil {
 			panic(err)
 		}
-		if status >= 300 && status != http.StatusNotFound { // 404 just means no TOTP is set
+
+		if status == http.StatusNotFound {
+			// 404 just means no TOTP is set, not fatal
+			httputil.SendJSON(writer, http.StatusOK, apiResponse{nil, &struct{ Certs []*certMeta }{[]*certMeta{}}})
+			return
+		}
+
+		if status >= 300 {
 			panic(fmt.Sprintf("non-200 status code %d from API server", status))
 		}
 		if apiRes.Email != ssn.Email {
@@ -564,12 +633,19 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		getRes := &struct {
 			Email, Created            string
 			ActiveCerts, RevokedCerts []*certMeta
-		}{}
+		}{"", "", []*certMeta{}, []*certMeta{}}
 		status, err = httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "certs", apiRes.Email), "GET", struct{}{}, getRes)
 		if err != nil {
 			panic(err)
 		}
-		if status >= 300 && status != http.StatusNotFound {
+
+		if status == http.StatusNotFound {
+			// 404 just means no TOTP is set, not fatal
+			httputil.SendJSON(writer, http.StatusOK, apiResponse{nil, &struct{ Certs []*certMeta }{[]*certMeta{}}})
+			return
+		}
+
+		if status >= 300 {
 			panic(fmt.Sprintf("non-200 status code %d from API server", status))
 		}
 		if apiRes.Email != getRes.Email {
