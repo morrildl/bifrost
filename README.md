@@ -89,32 +89,96 @@ The `./src/` directory contains the Go source code for the management REST API s
     mv pgcert bifrost heimdall ansible/tmp
 
 ## Generate keymatter
+
+### Create a Certificate Authority root signing certificate
+    cd ansible/tmp
+
     ./pgcert \
         -bits 4096 -days 3650 -pass something \
         -cn "Temp Authority" -org "Sententious Heavy Industries" \
         -locality "Mountain View" -province "CA" -country "US" \
-        rootca ansible/tmp/ca.key ansible/tmp/ca.crt
+        rootca ca.key ca.crt
+
+### Create an OpenVPN server certificate
 
     ./pgcert \
-        -bits 4096 -days 365 -rootpass something -cn "ovpn.playground.global" \
-        server ansible/tmp/ca.key ansible/tmp/ca.crt
-    mv ovpn.playground.global.key ansible/tmp/server.key
-    mv ovpn.playground.global.crt ansible/tmp/server.crt
+        -bits 4096 -days 365 -rootpass something -pass something \
+        -cn "vpn.domain.tld" \
+        server ca.key ca.crt
+    mv vpn.domain.tld.crt openvpn-server.crt
+    mv vpn.domain.tld.key openvpn-server-tmp.key
+    openssl rsa -in openvpn-server-tmp.key -out openvpn-server.key
+    rm openvpn-server-tmp.key
+
+Note that the `-cn` value must be the hostname of the server, or it will fail validation by the
+clients.
+
+### Create a certificate for the Heimdall API server
 
     ./pgcert \
-        -bits 4096 -days 365 -rootpass something -pass something -cn "Heimdall API Client" \
-        client ansible/tmp/ca.key ansible/tmp/ca.crt
-    mv "Heimdall API Client".key ansible/tmp/client.key
-    mv "Heimdall API Client".crt ansible/tmp/client.crt
+        -bits 4096 -days 365 -rootpass something -pass something \
+        -cn "vpn.domain.tld" \
+        server ca.key ca.crt
+    mv vpn.domain.tld.crt heimdall-server.crt
+    mv vpn.domain.tld.key heimdall-server-tmp.key
+    openssl rsa -in heimdall-server-tmp.key -out heimdall-server.key
+    rm heimdall-server-tmp.key
 
-    openvpn --genkey --secret ansible/tmp/tls-auth.pem
+The Bifröst UI web server calls into Heimdall for most operations; that is, Bifröst is the
+primary (usually only) client of Heimdall. The purpose is to allow the API server, which handles
+the root CA keymatter, to be separated onto a different machine, if desired. This would improve
+an organization's security posture.
 
-    openssl dhparam -out ansible/tmp/dh-4096.pem -outform PEM 4096
+Note that, again, the `-cn` value must be the hostname of the server, or it will fail validation
+by the client.
+
+### Create a client certificate for Bifröst to use to talk to Heimdall
+
+    ./pgcert \
+        -bits 4096 -days 365 -rootpass something -pass something \
+        -cn "Heimdall API Client" \
+        client ca.key ca.crt
+    mv "Heimdall API Client".crt heimdall-client.crt
+    mv "Heimdall API Client".key heimdall-client-tmp.key
+    openssl rsa -in heimdall-client-tmp.key -out heimdall-client.key
+    rm heimdall-client-tmp.key
+
+This certificate identifies the front-end UI server (Bifröst) to the API server which manages
+the database and keys (Heimdall.) Heimdall will refuse to talk to any client except one which
+presents this certificate and private key.
+
+### Generate additional keymatter required by OpenVPN
+
+Create an OpenVPN `tls-auth` file, used to improve security during client connections:
+
+    openvpn --genkey --secret tls-auth.pem
+
+Create Diffie-Hellman parameters for the TLS server:
+
+    openssl dhparam -out dh-4096.pem -outform PEM 4096
+
+Place the password for the OpenVPN server private key into the relevant file:
+    
+    echo something > openvpn-server-pw.txt
+
+Note that this must match the value of the `-pass` argument used above.
+
+## Copy in your web UI HTTPS certificates
+
+The certificates created above are signed by your custom root CA, created in the first step. As this
+root CA will not be recognized by browsers, it can't be used to sign certificates that browsers
+will accept by default.
+
+So, you'll need to copy in standard TLS certificates, sourced from a commercial CA in the usual
+way. Note that certificates from <a href="https://letsencrypt.org">Let's Encrypt</a> are perfectly acceptable.
+
+Copy these files into the tree as PEM-encoded X509 certificate and PKCS11 RSA private key files
+as `ansible/tmp/bifrost-server.crt` and `ansible/tmp/bifrost-server.key` respectively.
 
 ## Create configuration
 ### Create `hosts.ini`
 
-    cp etc/ansible-hosts-example.ini ansible/tmp
+    cp etc/hosts-example.ini ansible/tmp/hosts.ini
     vim ansible/tmp/hosts.ini
 
 * `vpn_public_ip` - the public IP address of your VPN server
@@ -123,20 +187,54 @@ The `./src/` directory contains the Go source code for the management REST API s
   same as `vpn_public_ip` but different if you're behind a firewall)
 * `vpn_bind_port` - the machine-local port the OpenVPN process should bind
 * `vpn_uplink_interface` - the interface name of your machine's primary uplink (e.g. `eth0`)
-* `vpn_api_port` - the port number where the API server (`heimdall`) should listen
 * `vpn_client_domain` - the domain name to push to clients (i.e. via DHCP)
 * `vpn_client_dns_servers` - the list of DNS servers to push to clients (i.e. via DHCP)
 * `vpn_client_routes` - the list of routes to push to clients (i.e. via DHCP)
 * `oauth_client_id` - the Google Cloud OAuth client ID from developer console
 * `oauth_client_secret` - the Google Cloud OAuth client secret from developer console
 * `oauth_redirect_prefix` - the prefix (i.e. scheme+host+port) of the redirect target, configured in Google Cloud console
-
-    cp etc/config-bifrost-example.json ansible/tmp/bifrost.json
-    cp etc/config-heimdall-example.json ansible/tmp/heimdall.json
-    vim ansible/tmp/*json
-
-### 
+* `ca_key_password` - the password of the CA signing key (`ca.key`)
+* `bifrost_admin_list` - the list of email addresses who shall have admin rights in the web UI
+* `bifrost_bind_address` - the IP address for the web UI to listen on (possibly but not necessarily the same as `vpn_bind_ip`)
 
 ## Copy configuration to server
-    cd ansible
+
+    cd .. # i.e. up to $TREE/ansible
     ansible-playbook -i tmp/hosts.ini bifrost.yml
+
+# Usage and management
+
+You should now be able to visit the web UI at the port and address you configured above. If you
+log in (using Google OAuth2) as an administrator, you'll see the admin UI to manage users, change
+settings and policies, and view events. Admins are also users of the service, and can set TOTP
+password seeds and configure device certificates.
+
+If you're not an admin, you'll only be able to use the self-service features.
+
+Read on to get some tips on common tasks.
+
+## Restart web UI & API server
+
+    systemctl restart bifrost
+    systemctl restart heimdall
+
+## Restart OpenVPN service
+
+    systemctl restart openvpn-server@main
+
+## Access database directly
+
+    sqlite3 /opt/bifrost/heimdall.sqlite3
+
+## Update firewall configuration
+
+    vim /etc/sysconfig/iptables
+    systemctl restart iptables
+
+## Edit configuration files
+
+* Firewall rules: `/etc/sysconfig/iptables`
+* OpenVPN server: `/etc/openvpn/server/main.conf`
+* Change the `.ovpn` config files generated by Heimdall: `/opt/bifrost/etc/template.ovpn`
+* Change Bifröst web UI settings (e.g. to add/remove admins): `/opt/bifrost/etc/bifrost.json`
+* Change Heimdall API server settings: `/opt/bifrost/etc/heimdall.json`
