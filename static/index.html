@@ -27,7 +27,7 @@
 <script src="/static/bifrost.js" defer></script>
 
 <title></title>
-</style></head><body>
+</head><body>
 
 <!-- component template definitions -->
 <div style="display: none;">
@@ -181,7 +181,7 @@
             <li>
                The free OpenVPN Connect client is available for <a
                href="https://itunes.apple.com/us/app/openvpn-connect/id590379981?mt=8">iOS</a>
-               and <a href="https://play.google.com/store/apps/details?id=net.openvpn.openvpn&hl=en_US">Android</a>.
+               and <a href="https://play.google.com/store/apps/details?id=net.openvpn.openvpn">Android</a>.
             </li>
             <li>For Macs, the free <a href="https://tunnelblick.net/downloads.html">Tunnelblick</a> works well.</li>
             <li>Most Linux distributions provide OpenVPN packages that can use <code>.ovpn</code> files.</li>
@@ -486,7 +486,7 @@ sententio.us"></textarea>
             <p>
               You can use any app that supports TOTP, but your best bet is to use Google
               Authenticator on <a
-              href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en_US">Android</a>
+              href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2">Android</a>
               or <a
               href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iPhone</a>.
             </p> 
@@ -498,10 +498,10 @@ sententio.us"></textarea>
           <div v-if="configured">
             <p><b>You have already set up a password.</b></p>
             <p>
-              If you've lost, reset, or switched your phone, you'll need to reconfigure your {{
-              globals.ServiceName }} password. To do so, simply click the button below and scan
+              If you need to switch to a new phone, you'll need to reconfigure your {{
+              globals.ServiceName }} password. To do so, click the button below and scan
               the new barcode it creates, using your
-              <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&hl=en_US">Android</a>
+              <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2">Android</a>
               or <a
               href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iPhone</a>
               app.
@@ -514,9 +514,34 @@ sententio.us"></textarea>
           <div class="field">
             <div class="control">
               <button v-if="!configured" class="button is-info" @click="reset()">Set Password</button>
-              <button v-if="configured" class="button is-info" @click="reset()">Change Password</button>
+              <button v-if="configured" class="button is-info" @click="confirming = true">Reset Password</button>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="modal" :class="{'is-active': confirming }">
+        <div class="modal-background"></div>
+        <div class="modal-card">
+          <header class="modal-card-head">
+            <p class="modal-card-title">Careful!</p>
+            <button class="delete" aria-label="close" @click="confirming = false"></button>
+          </header>
+          <section class="modal-card-body">
+            <div class="content">
+              <p>
+                You're about to reset your password. If you continue, <b>you will no longer be
+                able to sign into {{ globals.ServiceName }}</b> unless you scan the new barcode.
+                You must have your phone with the <a
+                href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2">Android</a>
+                or <a
+                href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iPhone</a>
+                app installed with you, before you continue.
+            </div>
+          </section>
+          <footer class="modal-card-foot">
+            <button class="button" @click="confirming = false">Cancel</button>
+            <button class="button is-success" @click="reset()">Reset your password</button>
+          </footer>
         </div>
       </div>
       <div class="modal" :class="{'is-active': pendingServer}">

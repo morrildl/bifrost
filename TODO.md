@@ -1,5 +1,9 @@
 # TODO
 
+* don't do a /totp check on login if initial url is /sorry
+* fix heimdall service file (capitalization thing)
+* fix docs to refer to localhost instead of fqdn for heimdall server cert
+* update playbook to restart iptables
 * Write a test plan
 * Run the test plan
 

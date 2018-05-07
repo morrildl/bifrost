@@ -369,6 +369,7 @@ const totp = Vue.component('password', {
     return {
       configured: false,
       pendingServer: false,
+      confirming: false,
       imgURL: "",
       xhrPending: false,
       error: { },
@@ -388,6 +389,7 @@ const totp = Vue.component('password', {
   methods: {
     clearError: function() { this.error = { }; },
     reset: function() {
+      this.confirming = false;
       this.pendingServer = true;
       axios.post("/api/totp").then((res) => {
         if (res.data.Artifact) {
@@ -403,11 +405,12 @@ const totp = Vue.component('password', {
       this.pendingServer = false;
       this.imgURL = "";
       this.configured = true;
+      this.confirming = false;
     },
   },
 });
 
-const events = Vue.component('password', {
+const events = Vue.component('events', {
   template: "#events",
   props: [ "globals" ],
   data: function() {
