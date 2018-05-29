@@ -5,8 +5,6 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/tls"
-	"crypto/x509"
 	"crypto/x509/pkix"
 	"database/sql"
 	"encoding/base64"
@@ -15,7 +13,6 @@ import (
 	"io/ioutil"
 	"math/big"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -86,41 +83,24 @@ func initConfig(cfg *serverConfig) {
 func main() {
 	initConfig(cfg)
 
-	httputil.HandleFunc("/users", []string{"GET"}, usersHandler)
-	httputil.HandleFunc("/user/", []string{"GET", "PUT", "DELETE"}, userHandler)
-	httputil.HandleFunc("/certs", []string{"GET"}, certsHandler)
-	httputil.HandleFunc("/certs/", []string{"GET", "POST"}, certsHandler)
-	httputil.HandleFunc("/cert/", []string{"GET", "DELETE"}, certHandler)
-	httputil.HandleFunc("/events", []string{"GET", "DELETE"}, eventsHandler)
-	httputil.HandleFunc("/settings", []string{"GET", "PUT"}, settingsHandler)
-	httputil.HandleFunc("/whitelist", []string{"GET"}, whitelistHandler)
-	httputil.HandleFunc("/whitelist/", []string{"DELETE", "PUT"}, whitelistHandler)
+	server, mux := httputil.NewHardenedServer(cfg.BindAddress, cfg.Port)
+	server.RequireClientRoot(cfg.SelfSignedClientCertFile)
+	w := httputil.Wrapper().WithPanicHandler().WithSecretSentry()
+	mux.HandleFunc("/users", w.WithMethodSentry("GET").Wrap(usersHandler))
+	mux.HandleFunc("/user/", w.WithMethodSentry("GET", "PUT", "DELETE").Wrap(userHandler))
+	mux.HandleFunc("/certs", w.WithMethodSentry("GET").Wrap(certsHandler))
+	mux.HandleFunc("/certs/", w.WithMethodSentry("GET", "POST").Wrap(certsHandler))
+	mux.HandleFunc("/cert/", w.WithMethodSentry("GET", "DELETE").Wrap(certHandler))
+	mux.HandleFunc("/events", w.WithMethodSentry("GET", "DELETE").Wrap(eventsHandler))
+	mux.HandleFunc("/settings", w.WithMethodSentry("GET", "PUT").Wrap(settingsHandler))
+	mux.HandleFunc("/whitelist", w.WithMethodSentry("GET").Wrap(whitelistHandler))
+	mux.HandleFunc("/whitelist/", w.WithMethodSentry("DELETE", "PUT").Wrap(whitelistHandler))
 
-	httputil.HandleFunc("/", []string{"GET"}, func(writer http.ResponseWriter, req *http.Request) {
+	mux.HandleFunc("/", w.WithMethodSentry("GET").Wrap(func(writer http.ResponseWriter, req *http.Request) {
 		// serve a 404 to all other requests; note that "/" is effectively a wildcard
 		log.Warn("server", "incoming unknown request to '"+req.URL.Path+"'")
 		httputil.SendJSON(writer, http.StatusNotFound, struct{}{})
-	})
-
-	// Start an HTTPS server using certificate pinning - i.e. trust only one client, whose cert is our
-	// sole trusted "CA" root
-	selfSignedClientCert, err := ioutil.ReadFile(cfg.SelfSignedClientCertFile)
-	if err != nil {
-		log.Error("server.http", "error loading SelfSignedClientCertFile", err)
-		os.Exit(-1)
-	}
-	clientRoot := x509.NewCertPool()
-	clientRoot.AppendCertsFromPEM(selfSignedClientCert)
-	tlsConfig := &tls.Config{
-		ClientAuth: tls.RequireAndVerifyClientCert,
-		ClientCAs:  clientRoot,
-	}
-	tlsConfig.BuildNameToCertificate()
-	// now make an HTTP server using the self-signed-ready tls.Config
-	server := &http.Server{
-		Addr:      ":" + strconv.Itoa(cfg.Port),
-		TLSConfig: tlsConfig,
-	}
+	}))
 
 	log.Status("server.http", "starting HTTP on port "+strconv.Itoa(cfg.Port))
 	log.Error("server.http", "shutting down; error?", server.ListenAndServeTLS(cfg.ServerCertFile, cfg.ServerKeyFile))

@@ -1,7 +1,7 @@
 [Unit]
 Description=Bifrost Web UI
 ConditionPathExists=/opt/bifrost
-After=network.target
+After=network-online.target
  
 [Service]
 Type=simple

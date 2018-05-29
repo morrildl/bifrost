@@ -3,6 +3,7 @@
   "Port": 443,
   "HTTPPort": 80,
   "BindAddress": "{{bifrost_bind_address}}",
+  "RedirectHost": "{{bifrost_hostname}}",
   "HTTPSCertFile": "/opt/bifrost/etc/bifrost-server.crt",
   "HTTPSKeyFile": "/opt/bifrost/etc/bifrost-server.key",
   "LogFile": "/opt/bifrost/var/log/bifrost.log",

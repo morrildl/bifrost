@@ -3,7 +3,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,6 +25,7 @@ type serverConfig struct {
 	Port          int
 	HTTPPort      int
 	BindAddress   string
+	RedirectHost  string
 	LogFile       string
 	APIServerURL  string
 	StaticContent string
@@ -40,6 +40,7 @@ var cfg = &serverConfig{
 	false,
 	9000,
 	0,
+	"",
 	"",
 	"./bifrost.log",
 	"https://localhost:9090/",
@@ -66,79 +67,35 @@ func main() {
 	initConfig(cfg)
 	session.Ready()
 
+	server, mux := httputil.NewHardenedServer(cfg.BindAddress, cfg.Port)
+
 	// static content & OAuth2/session handlers
-	handler := static.Content{Path: cfg.StaticContent, Prefix: "/static/"}
+	content := static.Content{Path: cfg.StaticContent, Prefix: "/static/"}
 	if !config.Debug && !cfg.Debug {
-		handler.Preload("index.html", "favicon.ico")
+		content.Preload("index.html", "favicon.ico")
 	}
-	http.HandleFunc("/", handler.RootHandler)
-	http.HandleFunc("/favicon.ico", handler.FaviconHandler)
-	http.HandleFunc("/static/", handler.Handler)
-	http.HandleFunc(session.Config.OAuth.RedirectPath, static.OAuthHandler)
+	mux.HandleFunc("/", content.RootHandler)
+	mux.HandleFunc("/favicon.ico", content.FaviconHandler)
+	mux.HandleFunc("/static/", content.Handler)
+	mux.HandleFunc(session.Config.OAuth.RedirectPath, static.OAuthHandler)
 
 	// API endpoints
-	httputil.HandleFunc("/api/init", []string{"GET"}, initHandler)
-	httputil.HandleFunc("/api/config", []string{"GET", "PUT"}, configHandler)
-	httputil.HandleFunc("/api/whitelist", []string{"GET"}, whitelistHandler)
-	httputil.HandleFunc("/api/whitelist/", []string{"PUT", "DELETE"}, whitelistHandler)
-	httputil.HandleFunc("/api/users", []string{"GET"}, usersHandler)
-	httputil.HandleFunc("/api/users/", []string{"GET", "PUT", "DELETE"}, usersHandler)
-	httputil.HandleFunc("/api/certs", []string{"GET", "POST"}, certsHandler)
-	httputil.HandleFunc("/api/certs/", []string{"DELETE"}, certsHandler)
-	httputil.HandleFunc("/api/totp", []string{"GET", "POST"}, totpHandler)
-	httputil.HandleFunc("/api/events", []string{"GET"}, eventsHandler)
-
-	tlsConfig := &tls.Config{
-		PreferServerCipherSuites: true,
-		CurvePreferences: []tls.CurveID{
-			tls.CurveP256,
-			tls.X25519,
-		},
-		MinVersion: tls.VersionTLS12,
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			// tls.TLS_RSA_WITH_AES_256_GCM_SHA384, // no PFS
-			// tls.TLS_RSA_WITH_AES_128_GCM_SHA256, // no PFS
-		},
-	}
-
-	server := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.BindAddress, cfg.Port),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  120 * time.Second,
-		TLSConfig:    tlsConfig,
-		Handler:      http.DefaultServeMux,
-	}
+	w := httputil.Wrapper().WithPanicHandler().WithSecretSentry().WithSessionSentry(authError)
+	mux.HandleFunc("/api/init", w.WithMethodSentry("GET").Wrap(initHandler))
+	mux.HandleFunc("/api/config", w.WithMethodSentry("GET", "PUT").Wrap(configHandler))
+	mux.HandleFunc("/api/whitelist", w.WithMethodSentry("GET").Wrap(whitelistHandler))
+	mux.HandleFunc("/api/whitelist/", w.WithMethodSentry("PUT", "DELETE").Wrap(whitelistHandler))
+	mux.HandleFunc("/api/users", w.WithMethodSentry("GET").Wrap(usersHandler))
+	mux.HandleFunc("/api/users/", w.WithMethodSentry("GET", "PUT", "DELETE").Wrap(usersHandler))
+	mux.HandleFunc("/api/certs", w.WithMethodSentry("GET", "POST").Wrap(certsHandler))
+	mux.HandleFunc("/api/certs/", w.WithMethodSentry("DELETE").Wrap(certsHandler))
+	mux.HandleFunc("/api/totp", w.WithMethodSentry("GET", "POST").Wrap(totpHandler))
+	mux.HandleFunc("/api/events", w.WithMethodSentry("GET").Wrap(eventsHandler))
 
 	if cfg.HTTPSCertFile != "" { // HTTPS mode -- not behind reverse proxy
-		// if a bare-HTTP port was also specified, start up a server on that that redirects to HTTPS with HSTS
-		if cfg.HTTPPort > 0 {
-			go func() {
-				log.Warn("main (http)", "fallback HTTP server shutting down", (&http.Server{
-					ReadTimeout:  5 * time.Second,
-					WriteTimeout: 5 * time.Second,
-					IdleTimeout:  120 * time.Second,
-					Handler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-						w.Header().Set("Connection", "close")
-						if !cfg.Debug {
-							w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-						}
-						port := ""
-						if cfg.Port != 443 {
-							port = fmt.Sprintf(":%d", cfg.HTTPPort)
-						}
-						url := fmt.Sprintf("https://%s%s/%s", req.Host, port, req.URL.String())
-						log.Debug("main (http)", "redirect to https", url)
-						http.Redirect(w, req, url, http.StatusMovedPermanently)
-					}),
-				}).ListenAndServe())
-			}()
+		// start up an HSTS redirector if requested
+		if cfg.RedirectHost != "" && cfg.HTTPPort > 0 {
+			server.ListenAndServeHSTS(cfg.RedirectHost, cfg.HTTPPort)
 		}
 
 		// start the main HTTPS server
