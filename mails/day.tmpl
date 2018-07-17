@@ -1,0 +1,12 @@
+To: {{.Recipients}}
+From: "{{.SenderName}}" <{{.Sender}}>
+Subject: {{.ServiceName}} Access Expiring TOMORROW
+
+{{/* leave this as one line, however long, so that email clients properly reflow it. */}}
+
+Hi! You have client configurations for {{.ServiceName}} expiring TOMORROW!
+
+Please visit {{.URL}} right away, to revoke your old device configuration and obtain a new one.
+
+The devices are:
+{{.List}}

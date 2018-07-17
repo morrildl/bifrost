@@ -31,3 +31,6 @@
 [submodule "src/vendor/github.com/pquerna/otp"]
 	path = src/vendor/github.com/pquerna/otp
 	url = https://github.com/pquerna/otp
+[submodule "src/vendor/playground/mail"]
+	path = src/vendor/playground/mail
+	url = ssh://code.playground.global:29418/studio/playground/mail

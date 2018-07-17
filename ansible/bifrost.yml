@@ -74,11 +74,19 @@
         - bifrost-server.crt
         - bifrost-server.key
 
+    - name: copy Gjallarhorn email templates
+      copy: src=../mails/{{item}} dest=/opt/bifrost/mails/{{item}} owner=root group=root mode=u+rw,g+r,o+r
+      with_items:
+        - month.tmpl
+        - week.tmpl
+        - day.tmpl
+
     - name: copy server binaries
       copy: src=tmp/{{item}} dest=/opt/bifrost/sbin/{{item}} owner=root group=root mode=u+rwx,g+rx,o+rx
       with_items:
         - bifrost
         - heimdall
+        - gjallarhorn
         - pgcert
     
     - name: copy server config files
@@ -86,6 +94,7 @@
       with_items:
         - bifrost
         - heimdall
+        - gjallarhorn
     
     - name: copy systemd service files
       copy: src=files/etc/{{item}} dest=/lib/systemd/system/{{item}} owner=root group=root mode=u+rw,g+r,o+r
