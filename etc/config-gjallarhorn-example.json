@@ -1,0 +1,20 @@
+{
+  "Debug": true,
+  "DatabaseFile": "/opt/bifrost/heimdall.sqlite3",
+  "ServiceURL": "https://{{bifrost_hostname}}/",
+  "SenderName": "Gjallarhorn (VPN Alerts)",
+  "Mail": {
+    "SMTP": {
+      "Server": "smtp.gmail.com",
+      "Port": 25,
+      "User": "noreply@domain.tld",
+      "Password": "Sekr1tPassw0rd"
+    },
+    "TemplateRoot": "/opt/bifrost/mails",
+    "Templates": [
+      { "Name": "month", "File": "month.tmpl", "SenderEmail": "noreply@domain.tld" },
+      { "Name": "week", "File": "week.tmpl", "SenderEmail": "noreply@domain.tld" },
+      { "Name": "day", "File": "day.tmpl", "SenderEmail": "noreply@domain.tld" }
+    ]
+  }
+}
