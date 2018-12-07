@@ -1,4 +1,16 @@
-/* Copyright © Playground Global, LLC. All rights reserved. */
+// Copyright © 2018 Playground Global, LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package main
 
@@ -9,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"playground/apiclient"
 	"playground/config"
 	"playground/httputil"
 	"playground/httputil/static"
@@ -27,13 +40,12 @@ type serverConfig struct {
 	BindAddress   string
 	RedirectHost  string
 	LogFile       string
-	APIServerURL  string
 	StaticContent string
 	AdminUsers    []string
 	HTTPSCertFile string
 	HTTPSKeyFile  string
 	Session       *session.ConfigType
-	APIClient     *httputil.ConfigType
+	APIClient     *apiclient.API
 }
 
 var cfg = &serverConfig{
@@ -43,13 +55,17 @@ var cfg = &serverConfig{
 	"",
 	"",
 	"./bifrost.log",
-	"https://localhost:9090/",
 	"./static",
 	[]string{},
 	"",
 	"",
 	&session.Config,
-	&httputil.Config,
+	&apiclient.API{
+		URLBase:        "https://localhost:9090/",
+		ClientCertFile: "/opt/bifrost/etc/heimdall-client.crt",
+		ClientKeyFile:  "/opt/bifrost/etc/heimdall-client.key",
+		ServerCertFile: "/opt/bifrost/etc/heimdall-server.crt",
+	},
 }
 
 func initConfig(cfg *serverConfig) {
@@ -80,7 +96,7 @@ func main() {
 	mux.HandleFunc(session.Config.OAuth.RedirectPath, static.OAuthHandler)
 
 	// API endpoints
-	w := httputil.Wrapper().WithPanicHandler().WithSecretSentry().WithSessionSentry(authError)
+	w := httputil.Wrapper().WithPanicHandler().WithSessionSentry(authError)
 	mux.HandleFunc("/api/init", w.WithMethodSentry("GET").Wrap(initHandler))
 	mux.HandleFunc("/api/config", w.WithMethodSentry("GET", "PUT").Wrap(configHandler))
 	mux.HandleFunc("/api/whitelist", w.WithMethodSentry("GET").Wrap(whitelistHandler))
@@ -95,7 +111,8 @@ func main() {
 	if cfg.HTTPSCertFile != "" { // HTTPS mode -- not behind reverse proxy
 		// start up an HSTS redirector if requested
 		if cfg.RedirectHost != "" && cfg.HTTPPort > 0 {
-			server.ListenAndServeHSTS(cfg.RedirectHost, cfg.HTTPPort)
+			httputil.Config.EnableHSTS = true
+			server.ListenAndServeTLSRedirector(cfg.RedirectHost, cfg.HTTPPort)
 		}
 
 		// start the main HTTPS server
@@ -161,7 +178,7 @@ func loadSession(req *http.Request) (ssn *session.Session, s *settings, isAllowe
 		return
 	}
 
-	status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "settings"), "GET", struct{}{}, s)
+	status, err := cfg.APIClient.Call("settings", "GET", nil, struct{}{}, s)
 	if err != nil {
 		panic(err)
 	}
@@ -269,7 +286,7 @@ func configHandler(writer http.ResponseWriter, req *http.Request) {
 			httputil.SendJSON(writer, http.StatusBadRequest, &apiResponse{Error: clientJSONError})
 			return
 		}
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "settings"), "PUT", s, s)
+		status, err := cfg.APIClient.Call("settings", "PUT", nil, s, s)
 		if err != nil {
 			panic(err)
 		}
@@ -315,7 +332,7 @@ func whitelistHandler(writer http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case "GET":
 		users := &struct{ Users []string }{}
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "whitelist"), "GET", &struct{}{}, users)
+		status, err := cfg.APIClient.Call("whitelist", "GET", nil, &struct{}{}, users)
 		if err != nil {
 			panic(err)
 		}
@@ -329,7 +346,7 @@ func whitelistHandler(writer http.ResponseWriter, req *http.Request) {
 			return
 		}
 		users := &struct{ Users []string }{}
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "whitelist", email), "PUT", &struct{}{}, users)
+		status, err := cfg.APIClient.Call(apiclient.URLJoin("whitelist", email), "PUT", nil, &struct{}{}, users)
 		if err != nil {
 			panic(err)
 		}
@@ -344,7 +361,7 @@ func whitelistHandler(writer http.ResponseWriter, req *http.Request) {
 			return
 		}
 		users := &struct{ Users []string }{}
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "whitelist", email), "DELETE", &struct{}{}, users)
+		status, err := cfg.APIClient.Call(apiclient.URLJoin("whitelist", email), "DELETE", nil, &struct{}{}, users)
 		if err != nil {
 			panic(err)
 		}
@@ -399,7 +416,7 @@ func usersHandler(writer http.ResponseWriter, req *http.Request) {
 				Users []*user
 			}{[]*user{}}
 
-			status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "users"), "GET", struct{}{}, users)
+			status, err := cfg.APIClient.Call("users", "GET", nil, struct{}{}, users)
 			if err != nil {
 				panic(err)
 			}
@@ -417,7 +434,7 @@ func usersHandler(writer http.ResponseWriter, req *http.Request) {
 				ActiveCerts    []*cert
 			}{"", "", []*cert{}}
 
-			status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "user", email), "GET", struct{}{}, res)
+			status, err := cfg.APIClient.Call(apiclient.URLJoin("user", email), "GET", nil, struct{}{}, res)
 			if err != nil {
 				panic(err)
 			}
@@ -436,7 +453,7 @@ func usersHandler(writer http.ResponseWriter, req *http.Request) {
 			httputil.SendJSON(writer, http.StatusOK, apiResponse{nil, res})
 		}
 	case "DELETE":
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "user", email), "DELETE", struct{}{}, nil)
+		status, err := cfg.APIClient.Call(apiclient.URLJoin("user", email), "DELETE", nil, struct{}{}, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -494,7 +511,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 			ActiveCerts, RevokedCerts []*certMeta
 		}{"", "", []*certMeta{}, []*certMeta{}}
 
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "certs", ssn.Email), "GET", struct{}{}, apiRes)
+		status, err := cfg.APIClient.Call(apiclient.URLJoin("certs", ssn.Email), "GET", nil, struct{}{}, apiRes)
 		if err != nil {
 			panic(err)
 		}
@@ -541,7 +558,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		incert.Email = email
 
 		res := &struct{ OVPNDataURL string }{}
-		status, err := httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "certs", email), "POST", incert, res)
+		status, err := cfg.APIClient.Call(apiclient.URLJoin("certs", email), "POST", nil, incert, res)
 		if err != nil {
 			panic(err)
 		}
@@ -562,9 +579,9 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		}
 		apiRes := &cert{}
 
+		endpoint := apiclient.URLJoin("cert", fp)
 		// first fetch the metadata for the requested fingerprint to verify ownership
-		url := httputil.URLJoin(cfg.APIServerURL, "cert", fp)
-		status, err := httputil.CallAPI(url, "GET", struct{}{}, apiRes)
+		status, err := cfg.APIClient.Call(endpoint, "GET", nil, struct{}{}, apiRes)
 		if err != nil {
 			panic(err)
 		}
@@ -578,7 +595,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 		}
 
 		// user is either an admin, or the cert belongs to current user; now do the actual delete
-		status, err = httputil.CallAPI(url, "DELETE", struct{}{}, apiRes)
+		status, err = cfg.APIClient.Call(endpoint, "DELETE", nil, struct{}{}, apiRes)
 		if err != nil {
 			panic(err)
 		}
@@ -591,7 +608,7 @@ func certsHandler(writer http.ResponseWriter, req *http.Request) {
 			Email, Created            string
 			ActiveCerts, RevokedCerts []*certMeta
 		}{"", "", []*certMeta{}, []*certMeta{}}
-		status, err = httputil.CallAPI(httputil.URLJoin(cfg.APIServerURL, "certs", apiRes.Email), "GET", struct{}{}, getRes)
+		status, err = cfg.APIClient.Call(apiclient.URLJoin("certs", apiRes.Email), "GET", nil, struct{}{}, getRes)
 		if err != nil {
 			panic(err)
 		}
@@ -637,14 +654,14 @@ func totpHandler(writer http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	url := httputil.URLJoin(cfg.APIServerURL, "user", ssn.Email)
+	endpoint := apiclient.URLJoin("user", ssn.Email)
 
 	switch req.Method {
 	case "GET":
 		configured := &struct{ Configured bool }{}
 		res := &struct{ Email string }{} // this API call has more fields but we only care about this, here
 
-		status, err := httputil.CallAPI(url, "GET", struct{}{}, res)
+		status, err := cfg.APIClient.Call(endpoint, "GET", nil, struct{}{}, res)
 		if err != nil {
 			panic(err)
 		}
@@ -665,7 +682,7 @@ func totpHandler(writer http.ResponseWriter, req *http.Request) {
 		set := &struct{ ImageURL string }{}
 		res := &struct{ Email, TOTPURL string }{}
 
-		status, err := httputil.CallAPI(url, "PUT", struct{}{}, res)
+		status, err := cfg.APIClient.Call(endpoint, "PUT", nil, struct{}{}, res)
 		if err != nil {
 			panic(err)
 		}
@@ -712,7 +729,7 @@ func eventsHandler(writer http.ResponseWriter, req *http.Request) {
 	before := req.FormValue("before")
 
 	// fish out a ?before= pagination param and pass it on to API server if present
-	u := httputil.URLJoin(cfg.APIServerURL, "events")
+	u := "events"
 	if before != "" {
 		v := url.Values{}
 		v.Add("before", before)
@@ -723,7 +740,7 @@ func eventsHandler(writer http.ResponseWriter, req *http.Request) {
 		parsed.RawQuery = v.Encode()
 		u = parsed.String()
 	}
-	status, err := httputil.CallAPI(u, "GET", struct{}{}, res)
+	status, err := cfg.APIClient.Call(u, "GET", nil, struct{}{}, res)
 	if err != nil {
 		panic(err)
 	}

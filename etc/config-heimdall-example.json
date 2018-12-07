@@ -12,8 +12,6 @@
   "CAKeyPassword": "{{ ca_key_password }}",
   "TLSAuthFile": "/opt/bifrost/etc/tls-auth.pem",
   "OVPNTemplateFile": "/opt/bifrost/etc/template.ovpn",
-  "API": {
-    "APISecretHeader": "X-Playground-Api-Secret",
-    "APISecretValue": ""
-  }
+  "APIHeader": "X-Heimdall-Secret",
+  "APISecret": ""
 }

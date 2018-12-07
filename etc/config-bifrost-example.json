@@ -26,10 +26,9 @@
     }
   },
   "APIClient": {
+    "URLBase": "https://localhost:9090/",
     "ClientCertFile": "/opt/bifrost/etc/heimdall-client.crt",
     "ClientKeyFile": "/opt/bifrost/etc/heimdall-client.key",
-    "SelfSignedServerCertFile": "/opt/bifrost/etc/heimdall-server.crt",
-    "APISecretHeader": "X-Playground-Api-Secret",
-    "APISecretValue": ""
+    "ServerCertFile": "/opt/bifrost/etc/heimdall-server.crt"
   }
 }

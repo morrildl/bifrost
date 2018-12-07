@@ -3,6 +3,8 @@
 This project is everything you need to turn a new Fedora server into an OpenVPN server, including
 administrative and integration tools.
 
+Special thanks to Playground Global, LLC for open-sourcing this software. See `LICENSE` for details.
+
 # Overview
 
 This project consists of 3 key components.
@@ -27,14 +29,13 @@ The model is multi-factor authentication with a minimum of integration or overhe
 avoiding dependencies on other systems, especially password databases.
 
 Essentially this is three-factor authentication. To access the VPN you must have:
-1. The client certificate on the device itself (ideally stored in a hardware TPM)
-2. The device where the TOTP app is installed
+1. The client certificate on the device (i.e. laptop) itself (ideally stored in a hardware TPM, but beyond the scope of this project)
+2. The device (i.e. phone) where the TOTP app is installed
 3. The native passwords/lock codes to those devices
 
-That is, if an attacker wants to get onto the VPN, he must steal *two* devices, *and* be able to
-unlock those devices.
+That is, if an attacker wants to get onto the VPN, he must steal your phone, *and* your laptop, *and* know your screensaver password and your phone unlock code.
 
-Naturally the actual security of this model depends on the OS and user behavior, so sensibly
+Naturally the actual security of this model depends on the OS and user behavior, so sensible
 policies must also be used. Specifically, the device used for TOTP must not itself have a VPN client
 certificate. And of course suitable device-native locks should be used.
 
