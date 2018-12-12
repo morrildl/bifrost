@@ -1,9 +1,23 @@
 # Playground VPN-In-A-Box
 
 This project is everything you need to turn a new Fedora server into an OpenVPN server, including
-administrative and integration tools.
+administrative and integration tools. If you're using other than Fedora, the software will work
+fine but you may need to tweak the Ansible playbook for installation.
 
 Special thanks to Playground Global, LLC for open-sourcing this software. See `LICENSE` for details.
+
+# Cloning
+
+    git clone --recursive https://github.com/morrild/bifrost
+
+Note that this software relies on git submodules, so don't overlook the `--recursive` flag. (If you
+did overlook it, try `git submodule update --init --recursive`.)
+
+Though this is Go software, I use git submodules to manually mount libraries at specific places in
+my tree, as the standard `go get` behavior of conflating hosting site with source package name is
+poor software engineering practice. Specifically, the `playground/*` libraries are mirrored (or
+have been mirrored in the course of their development) on multiple sites, so I use git submodules
+to manage them.
 
 # Overview
 
@@ -12,7 +26,7 @@ This project consists of 3 key components.
 ## OpenVPN Runtime
 
 OpenVPN is, of course, doing all the heavy lifting. This project is essentially a constellation of
-tools to help deploy an OpenVPN security with a decently secure arrangement with decent usability.
+tools to help deploy an OpenVPN with a decently secure configuration, with decent usability.
 
 The key moving pieces are:
 
@@ -29,44 +43,38 @@ The model is multi-factor authentication with a minimum of integration or overhe
 avoiding dependencies on other systems, especially password databases.
 
 Essentially this is three-factor authentication. To access the VPN you must have:
-1. The client certificate on the device (i.e. laptop) itself (ideally stored in a hardware TPM, but beyond the scope of this project)
+1. The client certificate on the device (i.e. laptop) wanting to use VPN (ideally stored in a hardware TPM, but beyond the scope of this project)
 2. The device (i.e. phone) where the TOTP app is installed
-3. The native passwords/lock codes to those devices
+3. The OS passwords/lock codes to those devices
 
 That is, if an attacker wants to get onto the VPN, he must steal your phone, *and* your laptop, *and* know your screensaver password and your phone unlock code.
 
-Naturally the actual security of this model depends on the OS and user behavior, so sensible
-policies must also be used. Specifically, the device used for TOTP must not itself have a VPN client
-certificate. And of course suitable device-native locks should be used.
+Naturally the actual security of this model depends on the OS and user behavior, so sensible policies must also be used. Specifically, the device used for TOTP must not itself have a VPN client certificate (because then you lose a factor). And of course suitable OS-level screen locks must be used.
+
+Note that this implementation (currently) does _not_ use the OpenVPN administrative runtime hooks to disconnect a device with an extant connection, if that device's cert is revoked. Since the expectation is that the web UI runs behind the VPN, and not necessarily on the public internet, VPN access is required to refresh device certificates. Thus we cannot revoke clients immediately via OpenVPN admin hooks: it would kick users off instantly as soon as they click the disconnect button but before they can generate a new certificate for their device. Certainly a dedicated "re-up this device" UI flow for this case is possible, but it would be more complicated, and the current UI is specifically intended to be dirt simple. All of which is to say, this is a conscious usability vs. security tradeoff.
 
 ## Heimdall API Server
 
-Heimdall is an API server to front the SQLite3 database. The client authentication runtime scripts
-use the database to read certificate status (i.e. for validity and revocations), and write logs to
-it. The API server provides REST endpoints to manage certificates -- create users, reset TOTP seeds,
-issue and revoke certificates, etc.
+Heimdall is an API server to front the SQLite3 database. The client authentication runtime scripts use the database to read certificate status (i.e. for validity and revocations), and write logs to it. The API server provides REST endpoints to manage certificates -- create users, reset TOTP seeds, issue and revoke certificates, etc.
 
-The web UI is simply a front-end to Heimdall. A command-line front-end is also provided, but
-generally it's expected that most operations will be done via the web UI.
+The web UI is simply a front-end to Heimdall. A command-line front-end is also provided, but generally it's expected that most operations will be done via the web UI.
 
-Heimdall authenticates its client via certificate pinning. The intention is that the Heimdall
-process itself runs on the OpenVPN server, where the SQLite3 database is located. The web UI can be
-run anywhere, using Heimdall as its back-end.
+Heimdall authenticates its client via certificate pinning. The intention is that the Heimdall process itself runs on the OpenVPN server, where the SQLite3 database is located. The web UI can be run anywhere, using Heimdall as its back-end.
+
+The specific configuration encoded in the Ansible playbook has Heimdall and Bifröst running on the same machine. This is also fine, though with a reduced security posture; but the two were built separately to make it straightforward to split the two if desired.
 
 ## Bifröst Web UI
 
-The Bifröst web UI is where policy enforcement happens. This project is intended for use by a relatively
-small number of total users, perhaps up to a couple hundred. The UI is intended to be generally
-self-service.
+The Bifröst web UI is where policy enforcement happens. This project is intended for use by a relatively small number of total users, perhaps up to a couple hundred. The UI is intended to be generally self-service.
 
-Users can create and revoke certificates, up to a limit on number of extant certificates set by the
-administrator. For instance, the admin can set the limit to 1, allowing for only one machine at a
-time, intended to be a laptop. Or, the admin can set the limit to 3, perhaps allowing for a laptop,
-desktop, and tablet. If a user is at the limit, they must revoke a certificate to create a new one.
+Users can create and revoke certificates, up to a limit on number of extant certificates set by the administrator. For instance, the admin can set the limit to 1, allowing for only one machine at a time, intended to be a laptop. Or, the admin can set the limit to 3, perhaps allowing for a laptop, desktop, and tablet. If a user is at the limit, they must revoke a certificate to create a new one.
 
-The administrator can opt to either have a manual whitelist of users, or allow unrestricted access
-to a particular domain via Google's OAuth2/OpenID Connect. In both cases, the certificate limits are
-enforced.
+The administrator can opt to either have a manual whitelist of users, or allow unrestricted access to a particular domain via Google's OAuth2/OpenID Connect. In both cases, the certificate limits are enforced.
+
+## Gjallahorn
+
+Gjallarhorn is a binary intended to be run as a cron job that scans the extant certificates in the database, and sends notification emails about impending expirations. That is, it notifies users when their certificates are set to expire in 30/7/1 days, so that they can log in to the web UI and re-issue new certificates before they lose VPN access.
+
 
 # Contents
 
@@ -77,17 +85,18 @@ The `./ansible/` directory contains config files and an Ansible playbook to conf
 
 ## `./src/`
 
-The `./src/` directory contains the Go source code for the management REST API server.
+The `./src/` directory contains the Go source code for all three programs.
 
 # Installation
 
 ## Build binaries
 
-    GOPATH=`pwd` go build src/playground/bifrost/bifrost.go 
-    GOPATH=`pwd` go build src/playground/heimdall/heimdall.go 
-    GOPATH=`pwd` go build src/vendor/playground/ca/main/pgcert.go 
+    GOPATH=`pwd` go build src/bifrost/cmd/bifrost.go 
+    GOPATH=`pwd` go build src/heimdall/cmd/heimdall.go 
+    GOPATH=`pwd` go build src/gjallarhorn/cmd/gjallarhorn.go 
+    GOPATH=`pwd` go build src/vendor/playground/ca/cmd/pgcert.go 
 
-    mv pgcert bifrost heimdall ansible/tmp
+    mv pgcert bifrost heimdall gjallarhorn ansible/tmp
 
 ## Generate keymatter
 
@@ -118,10 +127,10 @@ clients.
 
     ./pgcert \
         -bits 4096 -days 365 -rootpass something -pass something \
-        -cn "vpn.domain.tld" \
+        -cn "localhost" \
         server ca.key ca.crt
-    mv vpn.domain.tld.crt heimdall-server.crt
-    mv vpn.domain.tld.key heimdall-server-tmp.key
+    mv localhost.crt heimdall-server.crt
+    mv localhost.key heimdall-server-tmp.key
     openssl rsa -in heimdall-server-tmp.key -out heimdall-server.key
     rm heimdall-server-tmp.key
 

@@ -43,6 +43,7 @@
         - bifrost/sbin
         - bifrost/var
         - bifrost/var/log
+        - bifrost/mails
 
     - name: create var directory
       file: state=directory path=/var/run/openvpn owner=root group=root mode=u+rwx,g-rwx,o-rwx
