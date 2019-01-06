@@ -8,7 +8,7 @@ Special thanks to Playground Global, LLC for open-sourcing this software. See `L
 
 # Cloning
 
-    git clone --recursive https://github.com/morrild/bifrost
+    git clone --recursive https://github.com/morrildl/bifrost
 
 Note that this software relies on git submodules, so don't overlook the `--recursive` flag. (If you
 did overlook it, try `git submodule update --init --recursive`.)
